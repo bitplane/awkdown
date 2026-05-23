@@ -800,6 +800,13 @@ function start_indented_code_block(parent, state, literal, indent,    code_id) {
     node_append_literal(open_node, literal)
 }
 
+function append_indented_code_block(parent, literal,    code_id) {
+    code_id = node_new("code_block")
+    node_append_child(parent, code_id)
+    node_append_literal(code_id, literal)
+    open_node = 0
+}
+
 function append_thematic_break_block(parent,    hr_id) {
     hr_id = node_new("thematic_break")
     node_append_child(parent, hr_id)
@@ -964,7 +971,66 @@ function start_blockquote(    quote_id) {
     append_blockquote_content(matched_content)
 }
 
-function append_blockquote_content(content,    para_id, heading_id, code_id, list_id, item_id, quote_id) {
+function start_nested_blockquote(content,    quote_id) {
+    quote_id = node_new("block_quote")
+    node_append_child(current_block_quote, quote_id)
+    current_block_quote = quote_id
+    current_block_quote_depth++
+    append_blockquote_content(content)
+}
+
+function start_blockquote_list(content,    list_id, item_id, quote_id, para_id) {
+    list_id = node_new("list")
+    node_set_attr(list_id, "list_type", matched_list_type)
+    node_set_attr(list_id, "marker", matched_list_marker)
+    if (matched_list_type == "ordered") {
+        node_set_attr(list_id, "start", matched_list_start)
+    }
+    node_append_child(current_block_quote, list_id)
+    item_id = node_new("list_item")
+    node_append_child(list_id, item_id)
+    current_list = list_id
+    current_list_item = item_id
+    current_list_type = matched_list_type
+    current_list_marker = matched_list_marker
+    current_list_marker_indent = matched_marker_indent
+    current_list_content_indent = matched_content_indent
+    current_list_depth = 1
+    current_list_in_blockquote = 1
+    save_list_context()
+
+    if (content != "") {
+        if (match_blockquote_marker(content)) {
+            quote_id = node_new("block_quote")
+            node_append_child(item_id, quote_id)
+            para_id = append_paragraph_block(quote_id, matched_content)
+            current_block_quote = quote_id
+            open_node = para_id
+            block_state = "blockquote_paragraph"
+            return
+        }
+        append_paragraph_block(item_id, content)
+    }
+    open_node = 0
+    block_state = "blockquote_open"
+}
+
+function start_blockquote_html_block(content,    html_id) {
+    html_id = node_new("html_block")
+    node_append_child(current_block_quote, html_id)
+    open_node = html_id
+    block_state = "blockquote_html"
+    node_literal[open_node] = content
+    node_has_literal[open_node] = 1
+}
+
+function start_blockquote_paragraph(content,    para_id) {
+    para_id = append_paragraph_block(current_block_quote, content)
+    open_node = para_id
+    block_state = "blockquote_paragraph"
+}
+
+function append_blockquote_content(content) {
     if (current_list && leading_spaces(content) >= current_list_content_indent) {
         if (start_list_child_block(content)) {
             block_state = "blockquote_open"
@@ -975,11 +1041,7 @@ function append_blockquote_content(content,    para_id, heading_id, code_id, lis
     }
 
     if (match_blockquote_marker(content)) {
-        para_id = node_new("block_quote")
-        node_append_child(current_block_quote, para_id)
-        current_block_quote = para_id
-        current_block_quote_depth++
-        append_blockquote_content(matched_content)
+        start_nested_blockquote(matched_content)
         return
     }
 
@@ -993,93 +1055,33 @@ function append_blockquote_content(content,    para_id, heading_id, code_id, lis
     }
 
     if (match_atx_heading(content)) {
-        heading_id = node_new("heading")
-        node_set_attr(heading_id, "level", matched_level)
-        node_literal[heading_id] = matched_content
-        node_append_child(current_block_quote, heading_id)
-        open_node = 0
+        append_heading_block(current_block_quote)
         block_state = "blockquote_open"
         return
     }
 
     if (match_opening_fence(content)) {
-        code_id = node_new("code_block")
-        node_set_attr(code_id, "fenced", 1)
-        node_set_attr(code_id, "info", matched_content)
-        node_append_child(current_block_quote, code_id)
-        open_node = code_id
-        block_state = "blockquote_fenced_code"
+        start_fenced_code_block(current_block_quote, "blockquote_fenced_code")
         return
     }
 
     if (leading_spaces(content) >= 4) {
-        code_id = node_new("code_block")
-        node_append_child(current_block_quote, code_id)
-        node_append_literal(code_id, strip_indent(content, 4))
-        open_node = 0
+        append_indented_code_block(current_block_quote, strip_indent(content, 4))
         block_state = "blockquote_open"
         return
     }
 
     if (match_list_marker(content)) {
-        list_id = node_new("list")
-        node_set_attr(list_id, "list_type", matched_list_type)
-        node_set_attr(list_id, "marker", matched_list_marker)
-        if (matched_list_type == "ordered") {
-            node_set_attr(list_id, "start", matched_list_start)
-        }
-        node_append_child(current_block_quote, list_id)
-        item_id = node_new("list_item")
-        node_append_child(list_id, item_id)
-        current_list = list_id
-        current_list_item = item_id
-        current_list_type = matched_list_type
-        current_list_marker = matched_list_marker
-        current_list_marker_indent = matched_marker_indent
-        current_list_content_indent = matched_content_indent
-        current_list_depth = 1
-        current_list_in_blockquote = 1
-        save_list_context()
-        if (matched_content != "") {
-            if (match_blockquote_marker(matched_content)) {
-                quote_id = node_new("block_quote")
-                node_append_child(item_id, quote_id)
-                para_id = node_new("paragraph")
-                node_append_child(quote_id, para_id)
-                node_literal[para_id] = matched_content
-                node_has_literal[para_id] = 1
-                current_block_quote = quote_id
-                open_node = para_id
-                block_state = "blockquote_paragraph"
-                return
-            } else {
-                para_id = node_new("paragraph")
-                node_append_child(item_id, para_id)
-                node_literal[para_id] = matched_content
-                node_has_literal[para_id] = 1
-            }
-        }
-        open_node = 0
-        block_state = "blockquote_open"
+        start_blockquote_list(matched_content)
         return
     }
 
     if (match_html_block_start(content)) {
-        para_id = node_new("html_block")
-        node_append_child(current_block_quote, para_id)
-        open_node = para_id
-        block_state = "blockquote_html"
-        node_literal[open_node] = content
-        node_has_literal[open_node] = 1
+        start_blockquote_html_block(content)
         return
     }
 
-    para_id = node_new("paragraph")
-    node_append_child(current_block_quote, para_id)
-    open_node = para_id
-    block_state = "blockquote_paragraph"
-    node_literal[open_node] = content
-    node_has_literal[open_node] = 1
+    start_blockquote_paragraph(content)
 }
 
 function match_atx_heading(line,    text, indent, hashes, rest, closing) {
