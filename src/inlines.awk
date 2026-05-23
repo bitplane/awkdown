@@ -513,11 +513,11 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
         html_end = find_sequence(text, start + 4, "-->")
         if (html_end) {
             if (substr(text, start, 5) == "<!-->") {
-                inline_html = "<!---->" html_escape(substr(text, start + 5, html_end - start - 2))
+                inline_html = "<!-->" html_escape(substr(text, start + 5, html_end - start - 2))
                 inline_html_end = html_end + 2
                 return 1
             } else if (substr(text, start, 6) == "<!--->") {
-                inline_html = "<!---->" html_escape(substr(text, start + 6, html_end - start - 3))
+                inline_html = "<!--->" html_escape(substr(text, start + 6, html_end - start - 3))
                 inline_html_end = html_end + 2
                 return 1
             } else {
