@@ -266,6 +266,12 @@ function emphasis_prev_char(text, pos,    i, ch) {
     if (i < 1) {
         return ""
     }
+    if (!awk_has_unicode_chars()) {
+        while (i > 1 && is_utf8_continuation_byte(substr(text, i, 1))) {
+            i--
+        }
+        return substr(text, i, pos - i)
+    }
     ch = substr(text, i, 1)
     if (ch == sprintf("%c", 28)) {
         return "x"
@@ -276,6 +282,9 @@ function emphasis_prev_char(text, pos,    i, ch) {
 function emphasis_next_char(text, pos,    ch, end) {
     if (pos > length(text)) {
         return ""
+    }
+    if (!awk_has_unicode_chars()) {
+        return utf8_char_at(text, pos)
     }
     ch = substr(text, pos, 1)
     if (ch == sprintf("%c", 28)) {
@@ -308,7 +317,15 @@ function emphasis_is_punctuation(ch) {
     if (ch == "" || emphasis_is_space(ch)) {
         return 0
     }
+    if (!is_ascii_string(ch)) {
+        return unicode_is_punctuation_or_symbol(ch)
+    }
     return ch !~ /^[[:alnum:]]$/
+}
+
+function unicode_is_punctuation_or_symbol(ch,    codepoint) {
+    codepoint = unicode_codepoint(ch)
+    return codepoint == 163 || codepoint == 165 || codepoint == 167 || codepoint == 169 || codepoint == 171 || codepoint == 172 || codepoint == 174 || codepoint == 176 || codepoint == 177 || codepoint == 182 || codepoint == 183 || codepoint == 187 || codepoint == 191 || (codepoint >= 8208 && codepoint <= 8292) || (codepoint >= 8352 && codepoint <= 8399) || codepoint == 123647
 }
 
 function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, content, html_end, spaces, j, saved_label, saved_dest, saved_title, saved_end, html) {
@@ -575,9 +592,38 @@ function normalize_reference_label(text,    out) {
     out = unescape_reference_label_brackets(text)
     gsub(/[\t\r\n ]+/, " ", out)
     out = trim(out)
+    out = unicode_case_fold(out)
     gsub(/ẞ/, "ss", out)
     gsub(/ß/, "ss", out)
     return tolower(out)
+}
+
+function unicode_case_fold(text) {
+    gsub(/Α/, "α", text)
+    gsub(/Β/, "β", text)
+    gsub(/Γ/, "γ", text)
+    gsub(/Δ/, "δ", text)
+    gsub(/Ε/, "ε", text)
+    gsub(/Ζ/, "ζ", text)
+    gsub(/Η/, "η", text)
+    gsub(/Θ/, "θ", text)
+    gsub(/Ι/, "ι", text)
+    gsub(/Κ/, "κ", text)
+    gsub(/Λ/, "λ", text)
+    gsub(/Μ/, "μ", text)
+    gsub(/Ν/, "ν", text)
+    gsub(/Ξ/, "ξ", text)
+    gsub(/Ο/, "ο", text)
+    gsub(/Π/, "π", text)
+    gsub(/Ρ/, "ρ", text)
+    gsub(/Σ/, "σ", text)
+    gsub(/Τ/, "τ", text)
+    gsub(/Υ/, "υ", text)
+    gsub(/Φ/, "φ", text)
+    gsub(/Χ/, "χ", text)
+    gsub(/Ψ/, "ψ", text)
+    gsub(/Ω/, "ω", text)
+    return text
 }
 
 function unescape_reference_label_brackets(text,    out, i, ch, next_ch) {
@@ -713,6 +759,9 @@ function character_from_codepoint(codepoint) {
     if (codepoint == 0 || (codepoint >= 55296 && codepoint <= 57343)) {
         return "�"
     }
+    if (!awk_has_unicode_chars()) {
+        return utf8_from_codepoint(codepoint)
+    }
     return sprintf("%c", codepoint)
 }
 
@@ -757,8 +806,55 @@ function is_uri_autolink(text) {
     return text ~ /^[A-Za-z][A-Za-z0-9.+-]{1,31}:[^ <>]*$/
 }
 
-function is_email_autolink(text) {
-    return text ~ /^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/
+function is_email_autolink(text,    at, local, domain, labels, count, i) {
+    at = index(text, "@")
+    if (at <= 1 || at != find_last_char(text, "@")) {
+        return 0
+    }
+
+    local = substr(text, 1, at - 1)
+    domain = substr(text, at + 1)
+    if (!is_email_local_part(local)) {
+        return 0
+    }
+
+    count = split(domain, labels, /\./)
+    if (count < 2) {
+        return 0
+    }
+    for (i = 1; i <= count; i++) {
+        if (!is_email_domain_label(labels[i])) {
+            return 0
+        }
+    }
+    return 1
+}
+
+function find_last_char(text, needle,    i, found) {
+    found = 0
+    for (i = 1; i <= length(text); i++) {
+        if (substr(text, i, 1) == needle) {
+            found = i
+        }
+    }
+    return found
+}
+
+function is_email_local_part(text,    i, ch) {
+    for (i = 1; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        if (ch !~ /^[A-Za-z0-9]$/ && index(".!#$%&'*+/=?^_`{|}~-", ch) == 0) {
+            return 0
+        }
+    }
+    return length(text) > 0
+}
+
+function is_email_domain_label(text) {
+    if (text == "" || substr(text, 1, 1) == "-" || substr(text, length(text), 1) == "-") {
+        return 0
+    }
+    return text ~ /^[A-Za-z0-9-]+$/
 }
 
 function is_raw_html_inline(text,    pos, len, ch, name, had_space) {
@@ -1103,6 +1199,10 @@ function is_ascii_character(ch,    i) {
 }
 
 function utf8_percent_encode(ch,    codepoint, out, b1, b2, b3, b4) {
+    if (!awk_has_unicode_chars()) {
+        return sprintf("%%%02X", byte_value(ch))
+    }
+
     codepoint = unicode_codepoint(ch)
     if (codepoint < 0) {
         return ch
@@ -1134,6 +1234,12 @@ function unicode_codepoint(ch,    codepoint) {
         return unicode_codepoint_cache[ch]
     }
 
+    if (!awk_has_unicode_chars()) {
+        codepoint = utf8_sequence_codepoint(ch)
+        unicode_codepoint_cache[ch] = codepoint
+        return codepoint
+    }
+
     for (codepoint = 128; codepoint <= 65535; codepoint++) {
         if (sprintf("%c", codepoint) == ch) {
             unicode_codepoint_cache[ch] = codepoint
@@ -1149,6 +1255,98 @@ function unicode_codepoint(ch,    codepoint) {
 
     unicode_codepoint_cache[ch] = -1
     return -1
+}
+
+function awk_has_unicode_chars() {
+    if (!awk_unicode_mode_checked) {
+        awk_unicode_mode = (length("ö") == 1)
+        awk_unicode_mode_checked = 1
+    }
+    return awk_unicode_mode
+}
+
+function is_ascii_string(text,    i) {
+    for (i = 1; i <= length(text); i++) {
+        if (!is_ascii_character(substr(text, i, 1))) {
+            return 0
+        }
+    }
+    return 1
+}
+
+function byte_value(ch,    i) {
+    if (ch in byte_value_cache) {
+        return byte_value_cache[ch]
+    }
+    for (i = 1; i <= 255; i++) {
+        if (sprintf("%c", i) == ch) {
+            byte_value_cache[ch] = i
+            return i
+        }
+    }
+    byte_value_cache[ch] = -1
+    return -1
+}
+
+function is_utf8_continuation_byte(ch,    value) {
+    value = byte_value(ch)
+    return value >= 128 && value <= 191
+}
+
+function utf8_char_at(text, pos,    first, value, len) {
+    first = substr(text, pos, 1)
+    value = byte_value(first)
+    if (value < 128 || value < 0) {
+        return first
+    }
+    if (value < 224) {
+        len = 2
+    } else if (value < 240) {
+        len = 3
+    } else {
+        len = 4
+    }
+    return substr(text, pos, len)
+}
+
+function utf8_sequence_codepoint(text,    b1, b2, b3, b4, len) {
+    len = length(text)
+    b1 = byte_value(substr(text, 1, 1))
+    if (len == 1) {
+        return b1
+    }
+    b2 = byte_value(substr(text, 2, 1))
+    if (len == 2) {
+        return ((b1 - 192) * 64) + (b2 - 128)
+    }
+    b3 = byte_value(substr(text, 3, 1))
+    if (len == 3) {
+        return ((b1 - 224) * 4096) + ((b2 - 128) * 64) + (b3 - 128)
+    }
+    b4 = byte_value(substr(text, 4, 1))
+    return ((b1 - 240) * 262144) + ((b2 - 128) * 4096) + ((b3 - 128) * 64) + (b4 - 128)
+}
+
+function utf8_from_codepoint(codepoint,    b1, b2, b3, b4) {
+    if (codepoint < 128) {
+        return sprintf("%c", codepoint)
+    }
+    if (codepoint < 2048) {
+        b1 = 192 + int(codepoint / 64)
+        b2 = 128 + (codepoint % 64)
+        return sprintf("%c%c", b1, b2)
+    }
+    if (codepoint < 65536) {
+        b1 = 224 + int(codepoint / 4096)
+        b2 = 128 + (int(codepoint / 64) % 64)
+        b3 = 128 + (codepoint % 64)
+        return sprintf("%c%c%c", b1, b2, b3)
+    }
+    b1 = 240 + int(codepoint / 262144)
+    b2 = 128 + (int(codepoint / 4096) % 64)
+    b3 = 128 + (int(codepoint / 64) % 64)
+    b4 = 128 + (codepoint % 64)
+    return sprintf("%c%c%c%c", b1, b2, b3, b4)
 }
 
 function find_code_span_closer(text, start,    i, run, len) {
