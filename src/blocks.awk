@@ -29,6 +29,11 @@ function blocks_process_line(line) {
         return
     }
 
+    if (leaf_state == "table") {
+        handle_table_line(line)
+        return
+    }
+
     if (leaf_state == "paragraph") {
         handle_paragraph_line(line)
         return
@@ -138,6 +143,10 @@ function handle_top_level_paragraph_line(line) {
         close_open_block()
         return
     }
+    if (match_table_delimiter_row(line, node_literal[open_node])) {
+        start_table_from_paragraph(open_node)
+        return
+    }
     if (match_setext_heading(line)) {
         extract_reference_definitions(open_node)
         if (node_type[open_node] == "reference_definition") {
@@ -155,6 +164,18 @@ function handle_top_level_paragraph_line(line) {
         return
     }
     if (match_list_marker(line) && list_can_interrupt_paragraph()) {
+        close_open_block_and_reprocess(line)
+        return
+    }
+    node_append_literal(open_node, line)
+}
+
+function handle_table_line(line) {
+    if (is_blank(line)) {
+        close_open_block()
+        return
+    }
+    if (line_interrupts_paragraph(line) || match_list_marker(line)) {
         close_open_block_and_reprocess(line)
         return
     }
@@ -843,6 +864,19 @@ function append_paragraph_block(parent, literal,    para_id) {
     return para_id
 }
 
+function start_table_from_paragraph(id,    i) {
+    node_type[id] = "table"
+    node_set_attr(id, "columns", matched_table_columns)
+    for (i = 1; i <= matched_table_columns; i++) {
+        node_set_attr(id, "header." i, matched_table_header[i])
+        node_set_attr(id, "align." i, matched_table_align[i])
+    }
+    node_literal[id] = ""
+    node_has_literal[id] = 0
+    open_node = id
+    set_block_state("", "table")
+}
+
 function start_nested_list_child(parent_item, parent_indent,    nested_list, item_id) {
     matched_marker_indent += parent_indent
     matched_content_indent += parent_indent
@@ -1003,6 +1037,84 @@ function line_interrupts_paragraph(line) {
         return 1
     }
     return 0
+}
+
+function match_table_delimiter_row(line, header,    i, cell) {
+    if (header == "" || header ~ /\n/) {
+        return 0
+    }
+    if (index(header, "|") == 0 && index(line, "|") == 0) {
+        return 0
+    }
+    if (!split_table_row(header, "matched_table_header")) {
+        return 0
+    }
+    matched_table_columns = table_cell_count
+    if (!split_table_row(line, "matched_table_delim")) {
+        return 0
+    }
+    if (table_cell_count != matched_table_columns) {
+        return 0
+    }
+    for (i = 1; i <= table_cell_count; i++) {
+        cell = trim(table_cell[i])
+        if (cell !~ /^:?-+:?$/) {
+            return 0
+        }
+        matched_table_align[i] = ""
+        if (cell ~ /^:-+:$/) {
+            matched_table_align[i] = "center"
+        } else if (cell ~ /^-+:$/) {
+            matched_table_align[i] = "right"
+        } else if (cell ~ /^:-+$/) {
+            matched_table_align[i] = "left"
+        }
+    }
+    return 1
+}
+
+function split_table_row(row, target,    text, i, ch, next_ch, cell) {
+    text = trim(row)
+    if (substr(text, 1, 1) == "|") {
+        text = substr(text, 2)
+    }
+    if (substr(text, length(text), 1) == "|" && !table_pipe_is_escaped(text, length(text))) {
+        text = substr(text, 1, length(text) - 1)
+    }
+
+    table_cell_count = 0
+    cell = ""
+    for (i = 1; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        next_ch = substr(text, i + 1, 1)
+        if (ch == "\\" && next_ch == "|") {
+            cell = cell "|"
+            i++
+        } else if (ch == "|") {
+            table_cell[++table_cell_count] = trim(cell)
+            cell = ""
+        } else {
+            cell = cell ch
+        }
+    }
+    table_cell[++table_cell_count] = trim(cell)
+
+    for (i = 1; i <= table_cell_count; i++) {
+        if (target == "matched_table_header") {
+            matched_table_header[i] = table_cell[i]
+        } else if (target == "matched_table_delim") {
+            matched_table_delim[i] = table_cell[i]
+        }
+    }
+    return table_cell_count > 0
+}
+
+function table_pipe_is_escaped(text, pos,    n, i) {
+    n = 0
+    for (i = pos - 1; i >= 1 && substr(text, i, 1) == "\\"; i--) {
+        n++
+    }
+    return n % 2
 }
 
 function append_blockquote_content(content) {

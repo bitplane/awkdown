@@ -30,6 +30,8 @@ if __name__ == "__main__":
             default=False, help='filter stdin through normalizer for testing')
     parser.add_argument('-n', '--number', type=int, default=None,
             help='only consider the test with the given number')
+    parser.add_argument('--skip', default='',
+            help='comma-separated example numbers to skip')
     parser.add_argument('--track', metavar='path',
             help='track which test cases pass/fail in the given JSON file and only report changes')
     args = parser.parse_args(sys.argv[1:])
@@ -102,7 +104,7 @@ def get_tests(specfile):
         for line in specf:
             line_number = line_number + 1
             l = line.strip()
-            if l == "`" * 32 + " example":
+            if re.match(r'^' + "`" * 32 + r' example(?:[ \t].*)?$', l):
                 state = 1
             elif state == 2 and l == "`" * 32:
                 state = 0
@@ -140,7 +142,10 @@ if __name__ == "__main__":
         pattern_re = re.compile(args.pattern, re.IGNORECASE)
     else:
         pattern_re = re.compile('.')
-    tests = [ test for test in all_tests if re.search(pattern_re, test['section']) and (not args.number or test['example'] == args.number) ]
+    skip_examples = set()
+    if args.skip:
+        skip_examples = set(int(n) for n in args.skip.split(',') if n)
+    tests = [ test for test in all_tests if re.search(pattern_re, test['section']) and (not args.number or test['example'] == args.number) and test['example'] not in skip_examples ]
     if args.dump_tests:
         out(json.dumps(tests, ensure_ascii=False, indent=2))
         exit(0)

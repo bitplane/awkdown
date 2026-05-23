@@ -192,7 +192,7 @@ function render_emphasis_text(text,    i, ch, run_len, prev_ch, next_ch, left, r
         }
     }
 
-    return render_emphasis_result(text)
+    return flatten_nested_emphasis_tags(render_emphasis_result(text), "strong")
 }
 
 function emphasis_reset(    i) {
@@ -285,6 +285,48 @@ function render_emphasis_result(text,    out, i, id, ch, lit, token_end) {
     return out
 }
 
+function flatten_nested_emphasis_tags(text, tag,    out, i, open_tag, close_tag, open_len, close_len, depth, em_depth) {
+    out = ""
+    open_tag = "<" tag ">"
+    close_tag = "</" tag ">"
+    open_len = length(open_tag)
+    close_len = length(close_tag)
+    depth = 0
+
+    for (i = 1; i <= length(text); i++) {
+        if (substr(text, i, 4) == "<em>") {
+            out = out "<em>"
+            em_depth++
+            i += 3
+        } else if (substr(text, i, 5) == "</em>") {
+            out = out "</em>"
+            if (em_depth > 0) {
+                em_depth--
+            }
+            i += 4
+        } else if (substr(text, i, open_len) == open_tag) {
+            depth++
+            strong_emphasis_depth[depth] = em_depth
+            strong_emphasis_skipped[depth] = (depth > 1 && strong_emphasis_depth[depth - 1] == em_depth)
+            if (!strong_emphasis_skipped[depth]) {
+                out = out open_tag
+            }
+            i += open_len - 1
+        } else if (substr(text, i, close_len) == close_tag) {
+            if (!strong_emphasis_skipped[depth]) {
+                out = out close_tag
+            }
+            if (depth > 0) {
+                depth--
+            }
+            i += close_len - 1
+        } else {
+            out = out substr(text, i, 1)
+        }
+    }
+    return out
+}
+
 function emphasis_prev_char(text, pos,    i, ch) {
     i = pos - 1
     if (i < 1) {
@@ -359,7 +401,10 @@ function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, conte
         next_ch = substr(text, i + 1, 1)
         prev_ch = substr(text, i - 1, 1)
 
-        if (ch == "&" && parse_character_reference(text, i)) {
+        if (parse_gfm_autolink(text, i)) {
+            out = out protect_inline_html(gfm_autolink_html)
+            i = gfm_autolink_end
+        } else if (ch == "&" && parse_character_reference(text, i)) {
             out = out html_escape_numeric(char_ref_text)
             i = char_ref_end
         } else if (ch == "!" && next_ch == "[") {
@@ -423,6 +468,15 @@ function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, conte
                 out = out html_escape(substr(text, i, code_span_len))
                 i += code_span_len - 1
             }
+        } else if (ch == "~" && next_ch == "~") {
+            closer = find_sequence(text, i + 2, "~~")
+            if (closer) {
+                content = substr(text, i + 2, closer - i - 2)
+                out = out protect_inline_html("<del>" render_inline_text(content) "</del>")
+                i = closer + 1
+            } else {
+                out = out html_escape(ch)
+            }
         } else if (ch == "\\" && is_ascii_punctuation(next_ch)) {
             out = out html_escape_numeric(next_ch)
             i++
@@ -458,8 +512,15 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
     if (substr(text, start, 4) == "<!--") {
         html_end = find_sequence(text, start + 4, "-->")
         if (html_end) {
-            content = substr(text, start + 4, html_end - start - 4)
-            if (is_html_comment_text(content)) {
+            if (substr(text, start, 5) == "<!-->") {
+                inline_html = "<!---->" html_escape(substr(text, start + 5, html_end - start - 2))
+                inline_html_end = html_end + 2
+                return 1
+            } else if (substr(text, start, 6) == "<!--->") {
+                inline_html = "<!---->" html_escape(substr(text, start + 6, html_end - start - 3))
+                inline_html_end = html_end + 2
+                return 1
+            } else {
                 inline_html = substr(text, start, html_end - start + 3)
                 inline_html_end = html_end + 2
                 return 1
@@ -499,7 +560,7 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
     } else if (is_email_autolink(content)) {
         inline_html = render_email_autolink_html(content)
     } else if (is_raw_html_inline(content)) {
-        inline_html = "<" content ">"
+        inline_html = escape_disallowed_raw_html("<" content ">")
     } else {
         return 0
     }
@@ -508,22 +569,173 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
     return 1
 }
 
-function is_html_comment_text(text) {
-    if (substr(text, 1, 1) == ">" || substr(text, 1, 2) == "->") {
-        return 0
-    }
-    if (substr(text, length(text), 1) == "-") {
-        return 0
-    }
-    return find_sequence(text, 1, "--") == 0
-}
-
 function render_uri_autolink_html(content) {
     return "<a href=\"" html_attr_escape(uri_autolink_href(content)) "\">" html_escape(content) "</a>"
 }
 
 function render_email_autolink_html(content) {
     return "<a href=\"mailto:" html_attr_escape(content) "\">" html_escape(content) "</a>"
+}
+
+function parse_gfm_autolink(text, start,    prev, lower) {
+    gfm_autolink_html = ""
+    gfm_autolink_end = start
+
+    prev = substr(text, start - 1, 1)
+    if (start > 1 && (is_ascii_alnum(prev) || prev == "@" || prev == "<" || previous_nonspace_char(text, start) == "<")) {
+        return 0
+    }
+
+    lower = tolower(substr(text, start, 8))
+    if (substr(lower, 1, 4) == "www." || substr(lower, 1, 7) == "http://" || substr(lower, 1, 8) == "https://" || substr(lower, 1, 6) == "ftp://") {
+        return parse_gfm_url_autolink(text, start)
+    }
+
+    if (is_email_local_char(substr(text, start, 1))) {
+        return parse_gfm_email_autolink(text, start)
+    }
+    return 0
+}
+
+function parse_gfm_url_autolink(text, start,    i, ch, url, href) {
+    for (i = start; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        if (ch ~ /^[ \t\n<]$/) {
+            break
+        }
+    }
+
+    url = substr(text, start, i - start)
+    url = trim_gfm_autolink_url(url)
+    if (url == "" || !gfm_url_has_valid_domain(url)) {
+        return 0
+    }
+
+    href = url
+    if (tolower(substr(url, 1, 4)) == "www.") {
+        href = "http://" href
+    }
+    gfm_autolink_html = "<a href=\"" html_attr_escape(href) "\">" html_escape(url) "</a>"
+    gfm_autolink_end = start + length(url) - 1
+    return 1
+}
+
+function trim_gfm_autolink_url(url,    open_count, close_count, i, ch) {
+    sub(/&[A-Za-z][A-Za-z0-9]+;$/, "", url)
+    while (url ~ /[?!.,:*_~;]$/) {
+        url = substr(url, 1, length(url) - 1)
+    }
+
+    open_count = 0
+    close_count = 0
+    for (i = 1; i <= length(url); i++) {
+        ch = substr(url, i, 1)
+        if (ch == "(") {
+            open_count++
+        } else if (ch == ")") {
+            close_count++
+        }
+    }
+    while (close_count > open_count && substr(url, length(url), 1) == ")") {
+        url = substr(url, 1, length(url) - 1)
+        close_count--
+    }
+    return url
+}
+
+function gfm_url_has_valid_domain(url,    rest, slash) {
+    rest = url
+    if (tolower(substr(rest, 1, 7)) == "http://") {
+        rest = substr(rest, 8)
+    } else if (tolower(substr(rest, 1, 8)) == "https://") {
+        rest = substr(rest, 9)
+    } else if (tolower(substr(rest, 1, 6)) == "ftp://") {
+        rest = substr(rest, 7)
+    } else if (tolower(substr(rest, 1, 4)) == "www.") {
+        rest = substr(rest, 5)
+    }
+    slash = index(rest, "/")
+    if (slash) {
+        rest = substr(rest, 1, slash - 1)
+    }
+    return rest ~ /^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]*[A-Za-z0-9]$/
+}
+
+function parse_gfm_email_autolink(text, start,    pos, at, local, domain_start, domain_end, email, next_ch) {
+    pos = start
+    while (pos <= length(text) && is_email_local_char(substr(text, pos, 1))) {
+        pos++
+    }
+    if (substr(text, pos, 1) != "@") {
+        return 0
+    }
+
+    at = pos
+    local = substr(text, start, at - start)
+    if (local == "" || local ~ /^\./ || local ~ /\.$/) {
+        return 0
+    }
+
+    domain_start = at + 1
+    domain_end = parse_gfm_email_domain(text, domain_start)
+    if (!domain_end) {
+        return 0
+    }
+    next_ch = substr(text, domain_end + 1, 1)
+    if (next_ch == "-" || next_ch == "_") {
+        return 0
+    }
+
+    email = substr(text, start, domain_end - start + 1)
+    gfm_autolink_html = "<a href=\"mailto:" html_attr_escape(email) "\">" html_escape(email) "</a>"
+    gfm_autolink_end = domain_end
+    return 1
+}
+
+function parse_gfm_email_domain(text, start,    pos, label, labels, ch) {
+    pos = start
+    labels = 0
+    while (pos <= length(text)) {
+        label = ""
+        while (pos <= length(text)) {
+            ch = substr(text, pos, 1)
+            if (ch !~ /^[A-Za-z0-9-]$/) {
+                break
+            }
+            label = label ch
+            pos++
+        }
+        if (label == "" || label ~ /^-/ || label ~ /-$/) {
+            return 0
+        }
+        labels++
+        if (substr(text, pos, 1) != ".") {
+            break
+        }
+        pos++
+        if (pos > length(text)) {
+            pos--
+            break
+        }
+    }
+    if (labels < 2 || label !~ /[A-Za-z]/) {
+        return 0
+    }
+    return pos - 1
+}
+
+function previous_nonspace_char(text, pos,    i, ch) {
+    for (i = pos - 1; i >= 1; i--) {
+        ch = substr(text, i, 1)
+        if (ch != " " && ch != "\t" && ch != "\n") {
+            return ch
+        }
+    }
+    return ""
+}
+
+function is_email_local_char(ch) {
+    return ch ~ /^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]$/
 }
 
 function parse_image(text, start) {

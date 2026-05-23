@@ -11,6 +11,54 @@ function html_attr_escape(text) {
     return html_escape(text)
 }
 
+function escape_disallowed_raw_html(text,    out, i, ch) {
+    out = ""
+    for (i = 1; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        if (ch == "<" && is_disallowed_raw_html_tag_at(text, i)) {
+            out = out "&lt;"
+        } else {
+            out = out ch
+        }
+    }
+    return out
+}
+
+function escape_disallowed_raw_html_block(text,    out, i, ch) {
+    out = ""
+    for (i = 1; i <= length(text); i++) {
+        ch = substr(text, i, 1)
+        if (ch == "<" && is_disallowed_raw_html_block_tag_at(text, i)) {
+            out = out "&lt;"
+        } else {
+            out = out ch
+        }
+    }
+    return out
+}
+
+function is_disallowed_raw_html_tag_at(text, pos,    rest, name) {
+    rest = substr(text, pos + 1)
+    sub(/^\//, "", rest)
+    if (rest !~ /^[A-Za-z]/) {
+        return 0
+    }
+    name = tolower(rest)
+    sub(/[^a-z].*$/, "", name)
+    return name ~ /^(title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)$/
+}
+
+function is_disallowed_raw_html_block_tag_at(text, pos,    rest, name) {
+    rest = substr(text, pos + 1)
+    sub(/^\//, "", rest)
+    if (rest !~ /^[A-Za-z]/) {
+        return 0
+    }
+    name = tolower(rest)
+    sub(/[^a-z].*$/, "", name)
+    return name ~ /^(xmp|iframe|noembed|noframes|plaintext)$/
+}
+
 function ltrim(text) {
     sub(/^[ \t\r\n]+/, "", text)
     return text

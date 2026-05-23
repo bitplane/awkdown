@@ -1,6 +1,7 @@
 AWK ?= awk
 PYTHON ?= python3
 SPEC_ARGS ?=
+GFM_SPEC_ARGS ?= --skip 619,620
 PROGRAM ?= build/awkdown
 
 AWK_SOURCES = \
@@ -42,15 +43,25 @@ lint: build/awkdown ## Run gawk POSIX lint when gawk is installed.
 smoke: build/awkdown ## Run focused local smoke tests with AWK=<command>.
 	test/run-smoke.sh "$(AWK)" build/awkdown
 
-.PHONY: spec
-spec: build/awkdown ## Run vendored CommonMark spec tests with PROGRAM=<command>.
+.PHONY: commonmark-spec
+commonmark-spec: build/awkdown ## Run vendored CommonMark spec tests with PROGRAM=<command>.
 	$(PYTHON) test/spec/spec_tests.py \
 		--spec test/spec/spec.txt \
 		--program '$(PROGRAM)' \
 		$(SPEC_ARGS)
 
+.PHONY: spec
+spec: gfm-spec ## Run the primary GitHub Flavored Markdown spec suite.
+
+.PHONY: gfm-spec
+gfm-spec: build/awkdown ## Run vendored GitHub Flavored Markdown spec tests with PROGRAM=<command>.
+	$(PYTHON) test/spec/spec_tests.py \
+		--spec test/gfm/spec.txt \
+		--program '$(PROGRAM)' \
+		$(GFM_SPEC_ARGS)
+
 .PHONY: test
-test: lint smoke spec ## Run lint, smoke tests, and the CommonMark spec suite.
+test: lint smoke gfm-spec ## Run lint, smoke tests, and the GitHub Flavored Markdown spec suite.
 
 .PHONY: clean
 clean: ## Remove generated build artifacts.
