@@ -42,6 +42,9 @@ function init_autolink_href_escapes() {
 }
 
 function render_inline_text(text,    out) {
+    # These passes build output strings incrementally, which is acceptable for
+    # normal Markdown paragraphs but can be quadratic for unusually large single
+    # paragraph inputs.
     inline_depth++
     out = render_emphasis_text(render_inline_base(text))
     inline_depth--

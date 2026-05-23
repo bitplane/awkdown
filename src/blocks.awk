@@ -4,92 +4,89 @@ function blocks_init() {
     nodes_init()
     root_node = node_new("document")
     open_node = 0
-    block_state = ""
+    set_block_state("", "")
     fence_char = ""
     fence_len = 0
     fence_indent = 0
-    current_list = 0
-    current_list_item = 0
-    current_list_type = ""
-    current_list_marker = ""
-    current_list_marker_indent = 0
-    current_list_content_indent = 0
-    current_list_depth = 0
-    pending_list_blank = 0
-    current_block_quote = 0
-    current_block_quote_depth = 0
-    current_list_in_blockquote = 0
+    reset_list_context()
+    reset_blockquote_context()
 }
 
 function blocks_process_line(line) {
-    if (block_state == "fenced_code") {
+    if (leaf_state == "fenced_code") {
         handle_fenced_code_line(line)
         return
     }
 
-    if (block_state == "indented_code") {
+    if (leaf_state == "indented_code") {
         if (handle_indented_code_line(line)) {
             return
         }
     }
 
-    if (block_state == "list_indented_code") {
-        handle_list_indented_code_line(line)
-        return
-    }
-
-    if (block_state == "list_fenced_code") {
-        handle_list_fenced_code_line(line)
-        return
-    }
-
-    if (block_state == "html_block") {
+    if (leaf_state == "html_block") {
         handle_html_block_line(line)
         return
     }
 
-    if (block_state == "blockquote_fenced_code") {
-        handle_blockquote_fenced_code_line(line)
-        return
-    }
-
-    if (block_state == "paragraph") {
+    if (leaf_state == "paragraph") {
         handle_paragraph_line(line)
         return
     }
 
-    if (block_state == "list_paragraph") {
-        handle_list_paragraph_line(line)
-        return
-    }
-
-    if (block_state == "blockquote_paragraph") {
-        handle_blockquote_paragraph_line(line)
-        return
-    }
-
-    if (block_state == "blockquote_open") {
+    if (block_context == "blockquote" && leaf_state == "") {
         handle_blockquote_open_line(line)
-        return
-    }
-
-    if (block_state == "blockquote_html") {
-        handle_blockquote_html_line(line)
         return
     }
 
     handle_top_level_line(line)
 }
 
-function handle_fenced_code_line(line) {
-    if (is_closing_fence(line)) {
-        close_open_block()
+function handle_fenced_code_line(line,    content) {
+    if (block_context == "blockquote") {
+        if (!strip_blockquote_markers(line, current_block_quote_depth)) {
+            close_blockquote_and_reprocess(line)
+            return
+        }
+        content = matched_content
+    } else if (block_context == "list") {
+        content = strip_list_continuation(line)
     } else {
-        node_append_literal(open_node, strip_indent(line, fence_indent))
+        content = line
     }
+
+    if (is_closing_fence(content)) {
+        if (block_context == "blockquote") {
+            close_open_block()
+            set_block_state("blockquote", "")
+        } else if (block_context == "list") {
+            open_node = 0
+            set_block_state("", "")
+        } else {
+            close_open_block()
+        }
+        return
+    }
+
+    node_append_literal(open_node, strip_indent(content, fence_indent))
 }
 
 function handle_indented_code_line(line) {
+    if (block_context == "list") {
+        if (is_blank(line)) {
+            node_append_literal(open_node, "")
+            return 1
+        }
+        if (leading_spaces(line) >= list_code_indent) {
+            node_append_literal(open_node, strip_indent(line, list_code_indent))
+            return 1
+        }
+        open_node = 0
+        set_block_state("", "")
+        blocks_process_line(line)
+        return 1
+    }
+
     if (is_blank(line)) {
         if (leading_spaces(line) >= 4) {
             node_append_literal(open_node, strip_indent(line, 4))
@@ -106,30 +103,21 @@ function handle_indented_code_line(line) {
     return 0
 }
 
-function handle_list_indented_code_line(line) {
-    if (is_blank(line)) {
-        node_append_literal(open_node, "")
-        return
-    }
-    if (leading_spaces(line) >= list_code_indent) {
-        node_append_literal(open_node, strip_indent(line, list_code_indent))
-        return
-    }
-    open_node = 0
-    block_state = ""
-    blocks_process_line(line)
-}
-
-function handle_list_fenced_code_line(line) {
-    if (is_closing_fence(strip_list_continuation(line))) {
-        open_node = 0
-        block_state = ""
-    } else {
-        node_append_literal(open_node, strip_indent(strip_list_continuation(line), fence_indent))
-    }
-}
-
 function handle_html_block_line(line) {
+    if (block_context == "blockquote") {
+        if (is_blank(line)) {
+            close_open_block()
+            leave_blockquote_context()
+            return
+        }
+        if (strip_blockquote_markers(line, current_block_quote_depth)) {
+            node_append_literal(open_node, matched_content)
+            return
+        }
+        close_blockquote_and_reprocess(line)
+        return
+    }
+
     if (html_block_end == "blank" && is_blank(line)) {
         close_open_block()
         return
@@ -140,24 +128,19 @@ function handle_html_block_line(line) {
     }
 }
 
-function handle_blockquote_fenced_code_line(line) {
-    if (strip_blockquote_markers(line, current_block_quote_depth)) {
-        line = matched_content
-    } else {
-        close_open_block()
-        leave_blockquote_context()
-        blocks_process_line(line)
+function handle_paragraph_line(line) {
+    if (block_context == "list") {
+        handle_list_paragraph_line(line)
         return
     }
-    if (is_closing_fence(line)) {
-        close_open_block()
-        block_state = "blockquote_open"
-    } else {
-        node_append_literal(open_node, strip_indent(line, fence_indent))
+    if (block_context == "blockquote") {
+        handle_blockquote_paragraph_line(line)
+        return
     }
+    handle_top_level_paragraph_line(line)
 }
 
-function handle_paragraph_line(line) {
+function handle_top_level_paragraph_line(line) {
     if (is_blank(line)) {
         close_open_block()
         return
@@ -174,19 +157,12 @@ function handle_paragraph_line(line) {
         close_open_block()
         return
     }
-    if (match_atx_heading(line) || match_thematic_break(line) || match_opening_fence(line) || (match_html_block_start(line) && matched_html_block_can_interrupt)) {
-        close_open_block()
-        blocks_process_line(line)
-        return
-    }
-    if (match_blockquote_marker(line)) {
-        close_open_block()
-        blocks_process_line(line)
+    if (line_interrupts_paragraph(line)) {
+        close_open_block_and_reprocess(line)
         return
     }
     if (match_list_marker(line) && list_can_interrupt_paragraph()) {
-        close_open_block()
-        blocks_process_line(line)
+        close_open_block_and_reprocess(line)
         return
     }
     node_append_literal(open_node, line)
@@ -205,9 +181,7 @@ function handle_list_paragraph_line(line) {
         return
     }
     if (match_thematic_break(line)) {
-        close_open_block()
-        current_list = 0
-        blocks_process_line(line)
+        leave_list_paragraph_for_thematic_break(line)
         return
     }
     if (current_list && leading_spaces(line) == current_list_marker_indent && match_list_marker(line)) {
@@ -235,27 +209,25 @@ function handle_list_paragraph_line(line) {
 function handle_blockquote_paragraph_line(line) {
     if (is_blank(line)) {
         close_open_block()
-        current_block_quote = 0
+        leave_blockquote_paragraph()
         return
     }
     if (strip_blockquote_markers_upto(line, current_block_quote_depth)) {
         if (is_blank(matched_content)) {
             close_open_block()
-            block_state = "blockquote_open"
+            set_block_state("blockquote", "")
             return
         }
         node_append_literal(open_node, matched_content)
         return
     }
     if (match_thematic_break(line)) {
-        close_open_block()
-        leave_blockquote_context()
-        blocks_process_line(line)
+        close_blockquote_and_reprocess(line)
         return
     }
     if (match_opening_fence(line) || match_list_marker(line)) {
         close_open_block()
-        current_block_quote = 0
+        reset_blockquote_context()
         blocks_process_line(line)
         return
     }
@@ -265,7 +237,7 @@ function handle_blockquote_paragraph_line(line) {
 function handle_blockquote_open_line(line) {
     if (is_blank(line)) {
         leave_blockquote_context()
-        block_state = ""
+        set_block_state("", "")
         return
     }
     if (strip_blockquote_markers(line, current_block_quote_depth)) {
@@ -273,46 +245,23 @@ function handle_blockquote_open_line(line) {
         return
     }
     leave_blockquote_context()
-    block_state = ""
+    set_block_state("", "")
     blocks_process_line(line)
 }
 
-function handle_blockquote_html_line(line) {
-    if (is_blank(line)) {
-        close_open_block()
-        leave_blockquote_context()
-        return
-    }
-    if (strip_blockquote_markers(line, current_block_quote_depth)) {
-        node_append_literal(open_node, matched_content)
-        return
-    }
-    close_open_block()
-    leave_blockquote_context()
-    blocks_process_line(line)
-}
-
-function handle_top_level_line(line,    heading_id, hr_id, code_id, para_id) {
+function handle_top_level_line(line,    html_id, para_id) {
     if (is_blank(line)) {
         if (current_list) {
             pending_list_blank = 1
         } else {
-            current_list_item = 0
-            current_list_content_indent = 0
-            pending_list_blank = 0
+            clear_inactive_list_item()
         }
-        current_block_quote = 0
-        current_block_quote_depth = 0
+        reset_blockquote_context()
         return
     }
 
     if (current_list && pending_list_blank && current_list_item && !node_first_child[current_list_item] && !match_list_marker(line)) {
-        current_list = 0
-        current_list_item = 0
-        current_list_content_indent = 0
-        current_list_marker_indent = 0
-        current_list_depth = 0
-        pending_list_blank = 0
+        reset_list_context()
     }
 
     while (current_list_depth > 1 && leading_spaces(line) < current_list_content_indent) {
@@ -336,18 +285,14 @@ function handle_top_level_line(line,    heading_id, hr_id, code_id, para_id) {
     }
 
     if (match_atx_heading(line)) {
-        heading_id = node_new("heading")
-        node_set_attr(heading_id, "level", matched_level)
-        node_literal[heading_id] = matched_content
-        node_append_child(root_node, heading_id)
+        append_heading_block(root_node)
         return
     }
 
     if (match_thematic_break(line)) {
-        current_list = 0
-        current_block_quote = 0
-        hr_id = node_new("thematic_break")
-        node_append_child(root_node, hr_id)
+        reset_list_context()
+        reset_blockquote_context()
+        append_thematic_break_block(root_node)
         return
     }
 
@@ -365,28 +310,14 @@ function handle_top_level_line(line,    heading_id, hr_id, code_id, para_id) {
     }
 
     if (match_opening_fence(line)) {
-        code_id = node_new("code_block")
-        node_set_attr(code_id, "fenced", 1)
-        node_set_attr(code_id, "info", matched_content)
-        node_append_child(root_node, code_id)
-        open_node = code_id
-        block_state = "fenced_code"
+        start_fenced_code_block(root_node, "")
         return
     }
 
     if (match_html_block_start(line)) {
-        current_list = 0
-        current_list_item = 0
-        current_list_content_indent = 0
-        current_list_marker_indent = 0
-        current_list_depth = 0
-        pending_list_blank = 0
-        code_id = node_new("html_block")
-        node_append_child(root_node, code_id)
-        open_node = code_id
-        block_state = "html_block"
+        reset_list_context()
+        html_id = start_html_block(root_node, "", line)
         html_block_end = matched_html_block_end
-        node_append_literal(open_node, line)
         if (html_block_end != "blank" && index(tolower(line), html_block_end)) {
             close_open_block()
         }
@@ -394,19 +325,13 @@ function handle_top_level_line(line,    heading_id, hr_id, code_id, para_id) {
     }
 
     if (leading_spaces(line) >= 4) {
-        code_id = node_new("code_block")
-        node_append_child(root_node, code_id)
-        open_node = code_id
-        block_state = "indented_code"
-        node_append_literal(open_node, strip_indent(line, 4))
+        start_indented_code_block(root_node, "", strip_indent(line, 4), 4)
         return
     }
 
-    para_id = node_new("paragraph")
-    node_append_child(root_node, para_id)
+    para_id = append_paragraph_block(root_node, line)
     open_node = para_id
-    block_state = "paragraph"
-    node_append_literal(open_node, line)
+    set_block_state("", "paragraph")
 }
 
 function blocks_finish() {
@@ -419,27 +344,67 @@ function close_open_block() {
     }
 
     open_node = 0
-    block_state = ""
+    set_block_state("", "")
     fence_char = ""
     fence_len = 0
     fence_indent = 0
     html_block_end = ""
 }
 
-function leave_blockquote_context() {
+function set_block_state(context, leaf) {
+    block_context = context
+    leaf_state = leaf
+}
+
+function close_open_block_and_reprocess(line) {
+    close_open_block()
+    blocks_process_line(line)
+}
+
+function clear_inactive_list_item() {
+    current_list_item = 0
+    current_list_content_indent = 0
+    pending_list_blank = 0
+}
+
+function leave_list_paragraph_for_thematic_break(line) {
+    close_open_block()
+    current_list = 0
+    blocks_process_line(line)
+}
+
+function leave_blockquote_paragraph() {
+    current_block_quote = 0
+}
+
+function reset_list_context() {
+    current_list = 0
+    current_list_item = 0
+    current_list_type = ""
+    current_list_marker = ""
+    current_list_marker_indent = 0
+    current_list_content_indent = 0
+    current_list_depth = 0
+    pending_list_blank = 0
+    current_list_in_blockquote = 0
+}
+
+function reset_blockquote_context() {
     current_block_quote = 0
     current_block_quote_depth = 0
+}
+
+function leave_blockquote_context() {
+    reset_blockquote_context()
     if (current_list_in_blockquote) {
-        current_list = 0
-        current_list_item = 0
-        current_list_type = ""
-        current_list_marker = ""
-        current_list_marker_indent = 0
-        current_list_content_indent = 0
-        current_list_depth = 0
-        pending_list_blank = 0
-        current_list_in_blockquote = 0
+        reset_list_context()
     }
+}
+
+function close_blockquote_and_reprocess(line) {
+    close_open_block()
+    leave_blockquote_context()
+    blocks_process_line(line)
 }
 
 function extract_reference_definitions(id,    text, rest, key, changed) {
@@ -670,7 +635,7 @@ function skip_spaces_tabs(text, pos) {
     return pos
 }
 
-function start_list_item(    list_id, item_id, para_id, hr_id) {
+function start_list_item(    list_id, item_id, para_id) {
     if (open_node) {
         close_open_block()
     }
@@ -680,40 +645,24 @@ function start_list_item(    list_id, item_id, para_id, hr_id) {
     }
 
     if (!current_list || current_list_type != matched_list_type || current_list_marker != matched_list_marker) {
-        list_id = node_new("list")
-        node_set_attr(list_id, "list_type", matched_list_type)
-        node_set_attr(list_id, "marker", matched_list_marker)
-        if (matched_list_type == "ordered") {
-            node_set_attr(list_id, "start", matched_list_start)
-        }
-        node_append_child(root_node, list_id)
-        current_list = list_id
-        current_list_type = matched_list_type
-        current_list_marker = matched_list_marker
-        current_list_in_blockquote = 0
-        current_list_marker_indent = matched_marker_indent
-        current_list_depth = 1
+        list_id = append_list_block(root_node)
+        set_current_list_block(list_id, 0)
         save_list_context()
     }
 
-    item_id = node_new("list_item")
-    node_append_child(current_list, item_id)
-    current_list_item = item_id
-    current_list_content_indent = matched_content_indent
-    save_list_context()
+    item_id = append_list_item(current_list)
+    set_current_list_item(item_id)
     pending_list_blank = 0
 
     if (matched_content == "") {
         open_node = 0
-        block_state = ""
+        set_block_state("", "")
         return
     }
 
     if (match_thematic_break(matched_content)) {
-        hr_id = node_new("thematic_break")
-        node_append_child(item_id, hr_id)
-        open_node = 0
-        block_state = ""
+        append_thematic_break_block(item_id)
+        set_block_state("", "")
         return
     }
 
@@ -721,12 +670,9 @@ function start_list_item(    list_id, item_id, para_id, hr_id) {
         return
     }
 
-    para_id = node_new("paragraph")
-    node_append_child(item_id, para_id)
+    para_id = append_paragraph_block(item_id, matched_content)
     open_node = para_id
-    block_state = "list_paragraph"
-    node_literal[open_node] = matched_content
-    node_has_literal[open_node] = 1
+    set_block_state("list", "paragraph")
 }
 
 function save_list_context() {
@@ -751,6 +697,24 @@ function restore_list_context() {
     current_list_content_indent = list_stack_content_indent[current_list_depth]
 }
 
+function set_current_list_block(list_id, in_blockquote) {
+    current_list = list_id
+    current_list_type = matched_list_type
+    current_list_marker = matched_list_marker
+    current_list_marker_indent = matched_marker_indent
+    current_list_depth = 1
+    # The parser stores list and blockquote state separately. This flag marks
+    # lists owned by the current blockquote so leaving that quote can clear
+    # only those lists, without discarding an outer top-level list.
+    current_list_in_blockquote = in_blockquote
+}
+
+function set_current_list_item(item_id) {
+    current_list_item = item_id
+    current_list_content_indent = matched_content_indent
+    save_list_context()
+}
+
 function push_list_context(list_id, item_id) {
     save_list_context()
     current_list_depth++
@@ -763,6 +727,17 @@ function push_list_context(list_id, item_id) {
     save_list_context()
 }
 
+function close_open_block_if_needed() {
+    if (open_node) {
+        close_open_block()
+    }
+}
+
+function finish_list_child_block() {
+    pending_list_blank = 0
+    return 1
+}
+
 function pop_list_context() {
     if (current_list_depth <= 1) {
         return
@@ -770,6 +745,23 @@ function pop_list_context() {
 
     current_list_depth--
     restore_list_context()
+}
+
+function append_list_block(parent,    list_id) {
+    list_id = node_new("list")
+    node_set_attr(list_id, "list_type", matched_list_type)
+    node_set_attr(list_id, "marker", matched_list_marker)
+    if (matched_list_type == "ordered") {
+        node_set_attr(list_id, "start", matched_list_start)
+    }
+    node_append_child(parent, list_id)
+    return list_id
+}
+
+function append_list_item(list_id,    item_id) {
+    item_id = node_new("list_item")
+    node_append_child(list_id, item_id)
+    return item_id
 }
 
 function append_heading_block(parent,    heading_id) {
@@ -780,21 +772,21 @@ function append_heading_block(parent,    heading_id) {
     open_node = 0
 }
 
-function start_fenced_code_block(parent, state,    code_id) {
+function start_fenced_code_block(parent, context,    code_id) {
     code_id = node_new("code_block")
     node_set_attr(code_id, "fenced", 1)
     node_set_attr(code_id, "info", matched_content)
     node_append_child(parent, code_id)
     open_node = code_id
-    block_state = state
+    set_block_state(context, "fenced_code")
 }
 
-function start_indented_code_block(parent, state, literal, indent,    code_id) {
+function start_indented_code_block(parent, context, literal, indent,    code_id) {
     code_id = node_new("code_block")
     node_append_child(parent, code_id)
     open_node = code_id
-    block_state = state
-    if (state == "list_indented_code") {
+    set_block_state(context, "indented_code")
+    if (context == "list") {
         list_code_indent = indent
     }
     node_append_literal(open_node, literal)
@@ -811,6 +803,15 @@ function append_thematic_break_block(parent,    hr_id) {
     hr_id = node_new("thematic_break")
     node_append_child(parent, hr_id)
     open_node = 0
+}
+
+function start_html_block(parent, context, content,    html_id) {
+    html_id = node_new("html_block")
+    node_append_child(parent, html_id)
+    open_node = html_id
+    set_block_state(context, "html_block")
+    node_append_literal(open_node, content)
+    return html_id
 }
 
 function start_blockquote_child(parent, content,    quote_id) {
@@ -832,32 +833,38 @@ function append_paragraph_block(parent, literal,    para_id) {
 function start_nested_list_child(parent_item, parent_indent,    nested_list, item_id) {
     matched_marker_indent += parent_indent
     matched_content_indent += parent_indent
-    nested_list = node_new("list")
-    node_set_attr(nested_list, "list_type", matched_list_type)
-    node_set_attr(nested_list, "marker", matched_list_marker)
-    if (matched_list_type == "ordered") {
-        node_set_attr(nested_list, "start", matched_list_start)
-    }
-    node_append_child(parent_item, nested_list)
-    item_id = node_new("list_item")
-    node_append_child(nested_list, item_id)
+    nested_list = append_list_block(parent_item)
+    item_id = append_list_item(nested_list)
     push_list_context(nested_list, item_id)
+}
+
+function start_nested_list_child_with_content(parent_item, parent_indent, content) {
+    start_nested_list_child(parent_item, parent_indent)
+    if (content != "") {
+        if (start_list_item_child_block(content)) {
+            return 1
+        }
+        append_paragraph_block(current_list_item, content)
+    }
+    open_node = 0
+    set_block_state("", "")
+    return 1
 }
 
 function start_list_item_child_block(content,    parent_indent) {
     if (match_atx_heading(content)) {
         append_heading_block(current_list_item)
-        block_state = ""
+        set_block_state("", "")
         return 1
     }
 
     if (match_opening_fence(content)) {
-        start_fenced_code_block(current_list_item, "list_fenced_code")
+        start_fenced_code_block(current_list_item, "list")
         return 1
     }
 
     if (leading_spaces(content) >= 4) {
-        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(content, 4), 4)
+        start_indented_code_block(current_list_item, "list", strip_indent(content, 4), 4)
         return 1
     }
 
@@ -868,22 +875,13 @@ function start_list_item_child_block(content,    parent_indent) {
 
     if (match_thematic_break(content)) {
         append_thematic_break_block(current_list_item)
-        block_state = ""
+        set_block_state("", "")
         return 1
     }
 
     if (match_list_marker(content)) {
         parent_indent = current_list_content_indent
-        start_nested_list_child(current_list_item, parent_indent)
-        if (matched_content != "") {
-            if (start_list_item_child_block(matched_content)) {
-                return 1
-            }
-            append_paragraph_block(current_list_item, matched_content)
-        }
-        open_node = 0
-        block_state = ""
-        return 1
+        return start_nested_list_child_with_content(current_list_item, parent_indent, matched_content)
     }
 
     return 0
@@ -893,12 +891,9 @@ function start_list_continuation_paragraph(line,    para_id) {
     if (pending_list_blank && current_list) {
         node_set_attr(current_list, "loose", 1)
     }
-    para_id = node_new("paragraph")
-    node_append_child(current_list_item, para_id)
+    para_id = append_paragraph_block(current_list_item, strip_list_continuation(line))
     open_node = para_id
-    block_state = "list_paragraph"
-    node_literal[open_node] = strip_list_continuation(line)
-    node_has_literal[open_node] = 1
+    set_block_state("list", "paragraph")
     pending_list_blank = 0
 }
 
@@ -906,57 +901,37 @@ function start_list_child_block(line,    content, parent_indent) {
     content = strip_list_continuation(line)
 
     if (pending_list_blank && leading_spaces(line) >= current_list_content_indent + 4) {
-        if (open_node) {
-            close_open_block()
-        }
+        close_open_block_if_needed()
         node_set_attr(current_list, "loose", 1)
-        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(line, current_list_content_indent + 4), current_list_content_indent + 4)
-        pending_list_blank = 0
-        return 1
+        start_indented_code_block(current_list_item, "list", strip_indent(line, current_list_content_indent + 4), current_list_content_indent + 4)
+        return finish_list_child_block()
     }
 
     if (match_opening_fence(content)) {
-        if (open_node) {
-            close_open_block()
-        }
-        start_fenced_code_block(current_list_item, "list_fenced_code")
-        pending_list_blank = 0
-        return 1
+        close_open_block_if_needed()
+        start_fenced_code_block(current_list_item, "list")
+        return finish_list_child_block()
     }
 
     if (match_blockquote_marker(content)) {
-        if (open_node) {
-            close_open_block()
-        }
+        close_open_block_if_needed()
         start_blockquote_child(current_list_item, matched_content)
-        pending_list_blank = 0
-        return 1
+        return finish_list_child_block()
     }
 
     if (!node_first_child[current_list_item] && leading_spaces(content) >= 4) {
-        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(content, 4), current_list_content_indent + 4)
-        pending_list_blank = 0
-        return 1
+        start_indented_code_block(current_list_item, "list", strip_indent(content, 4), current_list_content_indent + 4)
+        return finish_list_child_block()
     }
 
     if (match_list_marker(content)) {
-        if (open_node) {
-            close_open_block()
-        }
+        close_open_block_if_needed()
         parent_indent = current_list_content_indent
         if (pending_list_blank && current_list) {
             node_set_attr(current_list, "loose", 1)
         }
-        start_nested_list_child(current_list_item, parent_indent)
-        if (matched_content != "") {
-            if (start_list_item_child_block(matched_content)) {
-                pending_list_blank = 0
-                return 1
-            }
-            append_paragraph_block(current_list_item, matched_content)
-        }
-        pending_list_blank = 0
-        return 1
+        start_nested_list_child_with_content(current_list_item, parent_indent, matched_content)
+        return finish_list_child_block()
     }
 
     return 0
@@ -980,24 +955,10 @@ function start_nested_blockquote(content,    quote_id) {
 }
 
 function start_blockquote_list(content,    list_id, item_id, quote_id, para_id) {
-    list_id = node_new("list")
-    node_set_attr(list_id, "list_type", matched_list_type)
-    node_set_attr(list_id, "marker", matched_list_marker)
-    if (matched_list_type == "ordered") {
-        node_set_attr(list_id, "start", matched_list_start)
-    }
-    node_append_child(current_block_quote, list_id)
-    item_id = node_new("list_item")
-    node_append_child(list_id, item_id)
-    current_list = list_id
-    current_list_item = item_id
-    current_list_type = matched_list_type
-    current_list_marker = matched_list_marker
-    current_list_marker_indent = matched_marker_indent
-    current_list_content_indent = matched_content_indent
-    current_list_depth = 1
-    current_list_in_blockquote = 1
-    save_list_context()
+    list_id = append_list_block(current_block_quote)
+    item_id = append_list_item(list_id)
+    set_current_list_block(list_id, 1)
+    set_current_list_item(item_id)
 
     if (content != "") {
         if (match_blockquote_marker(content)) {
@@ -1006,34 +967,39 @@ function start_blockquote_list(content,    list_id, item_id, quote_id, para_id) 
             para_id = append_paragraph_block(quote_id, matched_content)
             current_block_quote = quote_id
             open_node = para_id
-            block_state = "blockquote_paragraph"
+            set_block_state("blockquote", "paragraph")
             return
         }
         append_paragraph_block(item_id, content)
     }
     open_node = 0
-    block_state = "blockquote_open"
+    set_block_state("blockquote", "")
 }
 
-function start_blockquote_html_block(content,    html_id) {
-    html_id = node_new("html_block")
-    node_append_child(current_block_quote, html_id)
-    open_node = html_id
-    block_state = "blockquote_html"
-    node_literal[open_node] = content
-    node_has_literal[open_node] = 1
+function start_blockquote_html_block(content) {
+    start_html_block(current_block_quote, "blockquote", content)
 }
 
 function start_blockquote_paragraph(content,    para_id) {
     para_id = append_paragraph_block(current_block_quote, content)
     open_node = para_id
-    block_state = "blockquote_paragraph"
+    set_block_state("blockquote", "paragraph")
+}
+
+function line_interrupts_paragraph(line) {
+    if (match_atx_heading(line) || match_thematic_break(line) || match_opening_fence(line) || match_blockquote_marker(line)) {
+        return 1
+    }
+    if (match_html_block_start(line) && matched_html_block_can_interrupt) {
+        return 1
+    }
+    return 0
 }
 
 function append_blockquote_content(content) {
     if (current_list && leading_spaces(content) >= current_list_content_indent) {
         if (start_list_child_block(content)) {
-            block_state = "blockquote_open"
+            set_block_state("blockquote", "")
             return
         }
         start_list_continuation_paragraph(content)
@@ -1049,25 +1015,25 @@ function append_blockquote_content(content) {
         if (current_list) {
             pending_list_blank = 1
         }
-        block_state = "blockquote_open"
+        set_block_state("blockquote", "")
         open_node = 0
         return
     }
 
     if (match_atx_heading(content)) {
         append_heading_block(current_block_quote)
-        block_state = "blockquote_open"
+        set_block_state("blockquote", "")
         return
     }
 
     if (match_opening_fence(content)) {
-        start_fenced_code_block(current_block_quote, "blockquote_fenced_code")
+        start_fenced_code_block(current_block_quote, "blockquote")
         return
     }
 
     if (leading_spaces(content) >= 4) {
         append_indented_code_block(current_block_quote, strip_indent(content, 4))
-        block_state = "blockquote_open"
+        set_block_state("blockquote", "")
         return
     }
 
