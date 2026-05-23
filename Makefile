@@ -5,10 +5,10 @@ PROGRAM ?= build/awkdown
 
 AWK_SOURCES = \
 	src/util.awk \
+	src/utf8.awk \
 	src/nodes.awk \
 	src/blocks.awk \
 	src/inlines.awk \
-	src/entities.awk \
 	src/render_html.awk \
 	src/main.awk
 
@@ -19,16 +19,16 @@ help: ## Show this help.
 .PHONY: build
 build: build/awkdown ## Build build/awkdown from ordered AWK sources.
 
-build/awkdown: $(AWK_SOURCES)
+build/entities.awk: scripts/entities.json scripts/gen-entities.awk
+	mkdir -p build
+	$(AWK) -f scripts/gen-entities.awk scripts/entities.json > $@
+
+build/awkdown: $(AWK_SOURCES) build/entities.awk
 	mkdir -p build
 	tmp="build/awkdown.$$$$"; \
-	{ printf '%s\n' '#!/usr/bin/awk -f'; cat $(AWK_SOURCES); } > "$$tmp"; \
+	{ printf '%s\n' '#!/usr/bin/awk -f'; cat $(AWK_SOURCES) build/entities.awk; } > "$$tmp"; \
 	chmod +x "$$tmp"; \
 	mv "$$tmp" build/awkdown
-
-.PHONY: entities
-entities: ## Regenerate src/entities.awk from scripts/entities.json (run when updating the HTML5 list).
-	$(AWK) -f scripts/gen-entities.awk scripts/entities.json > src/entities.awk
 
 .PHONY: lint
 lint: build/awkdown ## Run gawk POSIX lint when gawk is installed.

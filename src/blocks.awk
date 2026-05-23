@@ -772,76 +772,107 @@ function pop_list_context() {
     restore_list_context()
 }
 
-function start_list_item_child_block(content,    heading_id, code_id, quote_id, nested_list, item_id, para_id, parent_indent) {
+function append_heading_block(parent,    heading_id) {
+    heading_id = node_new("heading")
+    node_set_attr(heading_id, "level", matched_level)
+    node_literal[heading_id] = matched_content
+    node_append_child(parent, heading_id)
+    open_node = 0
+}
+
+function start_fenced_code_block(parent, state,    code_id) {
+    code_id = node_new("code_block")
+    node_set_attr(code_id, "fenced", 1)
+    node_set_attr(code_id, "info", matched_content)
+    node_append_child(parent, code_id)
+    open_node = code_id
+    block_state = state
+}
+
+function start_indented_code_block(parent, state, literal, indent,    code_id) {
+    code_id = node_new("code_block")
+    node_append_child(parent, code_id)
+    open_node = code_id
+    block_state = state
+    if (state == "list_indented_code") {
+        list_code_indent = indent
+    }
+    node_append_literal(open_node, literal)
+}
+
+function append_thematic_break_block(parent,    hr_id) {
+    hr_id = node_new("thematic_break")
+    node_append_child(parent, hr_id)
+    open_node = 0
+}
+
+function start_blockquote_child(parent, content,    quote_id) {
+    quote_id = node_new("block_quote")
+    node_append_child(parent, quote_id)
+    current_block_quote = quote_id
+    current_block_quote_depth = 1
+    append_blockquote_content(content)
+}
+
+function append_paragraph_block(parent, literal,    para_id) {
+    para_id = node_new("paragraph")
+    node_append_child(parent, para_id)
+    node_literal[para_id] = literal
+    node_has_literal[para_id] = 1
+    return para_id
+}
+
+function start_nested_list_child(parent_item, parent_indent,    nested_list, item_id) {
+    matched_marker_indent += parent_indent
+    matched_content_indent += parent_indent
+    nested_list = node_new("list")
+    node_set_attr(nested_list, "list_type", matched_list_type)
+    node_set_attr(nested_list, "marker", matched_list_marker)
+    if (matched_list_type == "ordered") {
+        node_set_attr(nested_list, "start", matched_list_start)
+    }
+    node_append_child(parent_item, nested_list)
+    item_id = node_new("list_item")
+    node_append_child(nested_list, item_id)
+    push_list_context(nested_list, item_id)
+}
+
+function start_list_item_child_block(content,    parent_indent) {
     if (match_atx_heading(content)) {
-        heading_id = node_new("heading")
-        node_set_attr(heading_id, "level", matched_level)
-        node_literal[heading_id] = matched_content
-        node_append_child(current_list_item, heading_id)
-        open_node = 0
+        append_heading_block(current_list_item)
         block_state = ""
         return 1
     }
 
     if (match_opening_fence(content)) {
-        code_id = node_new("code_block")
-        node_set_attr(code_id, "fenced", 1)
-        node_set_attr(code_id, "info", matched_content)
-        node_append_child(current_list_item, code_id)
-        open_node = code_id
-        block_state = "list_fenced_code"
+        start_fenced_code_block(current_list_item, "list_fenced_code")
         return 1
     }
 
     if (leading_spaces(content) >= 4) {
-        code_id = node_new("code_block")
-        node_append_child(current_list_item, code_id)
-        open_node = code_id
-        block_state = "list_indented_code"
-        list_code_indent = 4
-        node_append_literal(open_node, strip_indent(content, 4))
+        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(content, 4), 4)
         return 1
     }
 
     if (match_blockquote_marker(content)) {
-        quote_id = node_new("block_quote")
-        node_append_child(current_list_item, quote_id)
-        current_block_quote = quote_id
-        current_block_quote_depth = 1
-        append_blockquote_content(matched_content)
+        start_blockquote_child(current_list_item, matched_content)
         return 1
     }
 
     if (match_thematic_break(content)) {
-        item_id = node_new("thematic_break")
-        node_append_child(current_list_item, item_id)
-        open_node = 0
+        append_thematic_break_block(current_list_item)
         block_state = ""
         return 1
     }
 
     if (match_list_marker(content)) {
         parent_indent = current_list_content_indent
-        matched_marker_indent += parent_indent
-        matched_content_indent += parent_indent
-        nested_list = node_new("list")
-        node_set_attr(nested_list, "list_type", matched_list_type)
-        node_set_attr(nested_list, "marker", matched_list_marker)
-        if (matched_list_type == "ordered") {
-            node_set_attr(nested_list, "start", matched_list_start)
-        }
-        node_append_child(current_list_item, nested_list)
-        item_id = node_new("list_item")
-        node_append_child(nested_list, item_id)
-        push_list_context(nested_list, item_id)
+        start_nested_list_child(current_list_item, parent_indent)
         if (matched_content != "") {
             if (start_list_item_child_block(matched_content)) {
                 return 1
             }
-            para_id = node_new("paragraph")
-            node_append_child(item_id, para_id)
-            node_literal[para_id] = matched_content
-            node_has_literal[para_id] = 1
+            append_paragraph_block(current_list_item, matched_content)
         }
         open_node = 0
         block_state = ""
@@ -864,7 +895,7 @@ function start_list_continuation_paragraph(line,    para_id) {
     pending_list_blank = 0
 }
 
-function start_list_child_block(line,    content, code_id, quote_id, para_id, nested_list, item_id, parent_indent) {
+function start_list_child_block(line,    content, parent_indent) {
     content = strip_list_continuation(line)
 
     if (pending_list_blank && leading_spaces(line) >= current_list_content_indent + 4) {
@@ -872,12 +903,7 @@ function start_list_child_block(line,    content, code_id, quote_id, para_id, ne
             close_open_block()
         }
         node_set_attr(current_list, "loose", 1)
-        code_id = node_new("code_block")
-        node_append_child(current_list_item, code_id)
-        open_node = code_id
-        block_state = "list_indented_code"
-        list_code_indent = current_list_content_indent + 4
-        node_append_literal(open_node, strip_indent(line, list_code_indent))
+        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(line, current_list_content_indent + 4), current_list_content_indent + 4)
         pending_list_blank = 0
         return 1
     }
@@ -886,12 +912,7 @@ function start_list_child_block(line,    content, code_id, quote_id, para_id, ne
         if (open_node) {
             close_open_block()
         }
-        code_id = node_new("code_block")
-        node_set_attr(code_id, "fenced", 1)
-        node_set_attr(code_id, "info", matched_content)
-        node_append_child(current_list_item, code_id)
-        open_node = code_id
-        block_state = "list_fenced_code"
+        start_fenced_code_block(current_list_item, "list_fenced_code")
         pending_list_blank = 0
         return 1
     }
@@ -900,22 +921,13 @@ function start_list_child_block(line,    content, code_id, quote_id, para_id, ne
         if (open_node) {
             close_open_block()
         }
-        quote_id = node_new("block_quote")
-        node_append_child(current_list_item, quote_id)
-        current_block_quote = quote_id
-        current_block_quote_depth = 1
-        append_blockquote_content(matched_content)
+        start_blockquote_child(current_list_item, matched_content)
         pending_list_blank = 0
         return 1
     }
 
     if (!node_first_child[current_list_item] && leading_spaces(content) >= 4) {
-        code_id = node_new("code_block")
-        node_append_child(current_list_item, code_id)
-        open_node = code_id
-        block_state = "list_indented_code"
-        list_code_indent = current_list_content_indent + 4
-        node_append_literal(open_node, strip_indent(content, 4))
+        start_indented_code_block(current_list_item, "list_indented_code", strip_indent(content, 4), current_list_content_indent + 4)
         pending_list_blank = 0
         return 1
     }
@@ -925,30 +937,16 @@ function start_list_child_block(line,    content, code_id, quote_id, para_id, ne
             close_open_block()
         }
         parent_indent = current_list_content_indent
-        matched_marker_indent += parent_indent
-        matched_content_indent += parent_indent
         if (pending_list_blank && current_list) {
             node_set_attr(current_list, "loose", 1)
         }
-        nested_list = node_new("list")
-        node_set_attr(nested_list, "list_type", matched_list_type)
-        node_set_attr(nested_list, "marker", matched_list_marker)
-        if (matched_list_type == "ordered") {
-            node_set_attr(nested_list, "start", matched_list_start)
-        }
-        node_append_child(current_list_item, nested_list)
-        item_id = node_new("list_item")
-        node_append_child(nested_list, item_id)
-        push_list_context(nested_list, item_id)
+        start_nested_list_child(current_list_item, parent_indent)
         if (matched_content != "") {
             if (start_list_item_child_block(matched_content)) {
                 pending_list_blank = 0
                 return 1
             }
-            para_id = node_new("paragraph")
-            node_append_child(item_id, para_id)
-            node_literal[para_id] = matched_content
-            node_has_literal[para_id] = 1
+            append_paragraph_block(current_list_item, matched_content)
         }
         pending_list_blank = 0
         return 1
