@@ -55,7 +55,7 @@ jobs:
 
           chmod +x .ci-bin/awk .ci-bin/gawk .ci-bin/busybox-awk
 
-      - name: Run tests
+      - name: Run GFM tests
         run: |
           runner="./.ci-bin/${{ matrix.runner }}"
           make test AWK="$runner" PROGRAM="test/awkdown.sh $runner build/awkdown"

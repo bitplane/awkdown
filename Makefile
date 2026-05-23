@@ -1,6 +1,5 @@
 AWK ?= awk
 PYTHON ?= python3
-SPEC_ARGS ?=
 GFM_SPEC_ARGS ?= --skip 619,620
 PROGRAM ?= build/awkdown
 
@@ -42,13 +41,6 @@ lint: build/awkdown ## Run gawk POSIX lint when gawk is installed.
 .PHONY: smoke
 smoke: build/awkdown ## Run focused local smoke tests with AWK=<command>.
 	test/run-smoke.sh "$(AWK)" build/awkdown
-
-.PHONY: commonmark-spec
-commonmark-spec: build/awkdown ## Run vendored CommonMark spec tests with PROGRAM=<command>.
-	$(PYTHON) test/spec/spec_tests.py \
-		--spec test/spec/spec.txt \
-		--program '$(PROGRAM)' \
-		$(SPEC_ARGS)
 
 .PHONY: spec
 spec: gfm-spec ## Run the primary GitHub Flavored Markdown spec suite.
