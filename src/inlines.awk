@@ -1229,7 +1229,7 @@ function utf8_percent_encode(ch,    codepoint, out, b1, b2, b3, b4) {
     return sprintf("%%%02X%%%02X%%%02X%%%02X", b1, b2, b3, b4)
 }
 
-function unicode_codepoint(ch,    codepoint) {
+function unicode_codepoint(ch,    codepoint, low, high, mid, candidate) {
     if (ch in unicode_codepoint_cache) {
         return unicode_codepoint_cache[ch]
     }
@@ -1240,16 +1240,19 @@ function unicode_codepoint(ch,    codepoint) {
         return codepoint
     }
 
-    for (codepoint = 128; codepoint <= 65535; codepoint++) {
-        if (sprintf("%c", codepoint) == ch) {
-            unicode_codepoint_cache[ch] = codepoint
-            return codepoint
+    low = 128
+    high = 1114111
+    while (low <= high) {
+        mid = int((low + high) / 2)
+        candidate = sprintf("%c", mid)
+        if (candidate == ch) {
+            unicode_codepoint_cache[ch] = mid
+            return mid
         }
-    }
-    for (codepoint = 65536; codepoint <= 1114111; codepoint++) {
-        if (sprintf("%c", codepoint) == ch) {
-            unicode_codepoint_cache[ch] = codepoint
-            return codepoint
+        if (candidate < ch) {
+            low = mid + 1
+        } else {
+            high = mid - 1
         }
     }
 
