@@ -10,50 +10,28 @@ function inlines_init() {
         return
     }
 
-    init_named_entities()
+    init_entity_data()
+    load_entities()
     init_autolink_href_escapes()
     inlines_initialized = 1
 }
 
-function init_named_entities() {
-    named_entity["amp;"] = "&"
-    named_entity["lt;"] = "<"
-    named_entity["gt;"] = ">"
-    named_entity["quot;"] = "\""
-    named_entity["apos;"] = "'"
-    named_entity["nbsp;"] = " "
-    named_entity["copy;"] = "©"
-    named_entity["reg;"] = "®"
-    named_entity["trade;"] = "™"
-    named_entity["mdash;"] = "—"
-    named_entity["ndash;"] = "–"
-    named_entity["hellip;"] = "…"
-    named_entity["lsquo;"] = "‘"
-    named_entity["rsquo;"] = "’"
-    named_entity["ldquo;"] = "“"
-    named_entity["rdquo;"] = "”"
-    named_entity["laquo;"] = "«"
-    named_entity["raquo;"] = "»"
-    named_entity["euro;"] = "€"
-    named_entity["pound;"] = "£"
-    named_entity["yen;"] = "¥"
-    named_entity["cent;"] = "¢"
-    named_entity["plusmn;"] = "±"
-    named_entity["times;"] = "×"
-    named_entity["divide;"] = "÷"
-    named_entity["ne;"] = "≠"
-    named_entity["le;"] = "≤"
-    named_entity["ge;"] = "≥"
-    named_entity["deg;"] = "°"
-    named_entity["AElig;"] = "Æ"
-    named_entity["Dcaron;"] = "Ď"
-    named_entity["frac34;"] = "¾"
-    named_entity["HilbertSpace;"] = "ℋ"
-    named_entity["DifferentialD;"] = "ⅆ"
-    named_entity["ClockwiseContourIntegral;"] = "∲"
-    named_entity["ngE;"] = "≧̸"
-    named_entity["ouml;"] = "ö"
-    named_entity["auml;"] = "ä"
+# Decode the packed blob built by init_entity_data() (generated into
+# src/entities.awk) into the named_entity lookup. Each record is
+# "name;:codepoint[,codepoint...]"; codepoints are turned into text with the
+# same character_from_codepoint() used for numeric references, so the table is
+# correct under both the character-mode and byte-mode awk paths.
+function load_entities(    parts, kv, cps, i, j, n, m, text) {
+    n = split(ENTITY_DATA, parts, " ")
+    for (i = 1; i <= n; i++) {
+        split(parts[i], kv, ":")
+        m = split(kv[2], cps, ",")
+        text = ""
+        for (j = 1; j <= m; j++) {
+            text = text character_from_codepoint(cps[j] + 0)
+        }
+        named_entity[kv[1]] = text
+    }
 }
 
 function init_autolink_href_escapes() {

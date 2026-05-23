@@ -8,6 +8,7 @@ AWK_SOURCES = \
 	src/nodes.awk \
 	src/blocks.awk \
 	src/inlines.awk \
+	src/entities.awk \
 	src/render_html.awk \
 	src/main.awk
 
@@ -24,6 +25,10 @@ build/awkdown: $(AWK_SOURCES)
 	{ printf '%s\n' '#!/usr/bin/awk -f'; cat $(AWK_SOURCES); } > "$$tmp"; \
 	chmod +x "$$tmp"; \
 	mv "$$tmp" build/awkdown
+
+.PHONY: entities
+entities: ## Regenerate src/entities.awk from scripts/entities.json (run when updating the HTML5 list).
+	$(AWK) -f scripts/gen-entities.awk scripts/entities.json > src/entities.awk
 
 .PHONY: lint
 lint: build/awkdown ## Run gawk POSIX lint when gawk is installed.
