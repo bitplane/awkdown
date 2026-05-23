@@ -458,15 +458,12 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
     if (substr(text, start, 4) == "<!--") {
         html_end = find_sequence(text, start + 4, "-->")
         if (html_end) {
-            if (substr(text, start, 5) == "<!-->") {
-                inline_html = "<!-->" html_escape(substr(text, start + 5, html_end - start - 2))
-            } else if (substr(text, start, 6) == "<!--->") {
-                inline_html = "<!--->" html_escape(substr(text, start + 6, html_end - start - 3))
-            } else {
+            content = substr(text, start + 4, html_end - start - 4)
+            if (is_html_comment_text(content)) {
                 inline_html = substr(text, start, html_end - start + 3)
+                inline_html_end = html_end + 2
+                return 1
             }
-            inline_html_end = html_end + 2
-            return 1
         }
     } else if (substr(text, start, 2) == "<?") {
         html_end = find_sequence(text, start + 2, "?>")
@@ -509,6 +506,16 @@ function parse_inline_html_or_autolink(text, start,    html_end, content) {
 
     inline_html_end = html_end
     return 1
+}
+
+function is_html_comment_text(text) {
+    if (substr(text, 1, 1) == ">" || substr(text, 1, 2) == "->") {
+        return 0
+    }
+    if (substr(text, length(text), 1) == "-") {
+        return 0
+    }
+    return find_sequence(text, 1, "--") == 0
 }
 
 function render_uri_autolink_html(content) {
@@ -661,6 +668,39 @@ function unicode_case_fold(text) {
     gsub(/Χ/, "χ", text)
     gsub(/Ψ/, "ψ", text)
     gsub(/Ω/, "ω", text)
+    gsub(/А/, "а", text)
+    gsub(/Б/, "б", text)
+    gsub(/В/, "в", text)
+    gsub(/Г/, "г", text)
+    gsub(/Д/, "д", text)
+    gsub(/Е/, "е", text)
+    gsub(/Ё/, "ё", text)
+    gsub(/Ж/, "ж", text)
+    gsub(/З/, "з", text)
+    gsub(/И/, "и", text)
+    gsub(/Й/, "й", text)
+    gsub(/К/, "к", text)
+    gsub(/Л/, "л", text)
+    gsub(/М/, "м", text)
+    gsub(/Н/, "н", text)
+    gsub(/О/, "о", text)
+    gsub(/П/, "п", text)
+    gsub(/Р/, "р", text)
+    gsub(/С/, "с", text)
+    gsub(/Т/, "т", text)
+    gsub(/У/, "у", text)
+    gsub(/Ф/, "ф", text)
+    gsub(/Х/, "х", text)
+    gsub(/Ц/, "ц", text)
+    gsub(/Ч/, "ч", text)
+    gsub(/Ш/, "ш", text)
+    gsub(/Щ/, "щ", text)
+    gsub(/Ъ/, "ъ", text)
+    gsub(/Ы/, "ы", text)
+    gsub(/Ь/, "ь", text)
+    gsub(/Э/, "э", text)
+    gsub(/Ю/, "ю", text)
+    gsub(/Я/, "я", text)
     return text
 }
 
