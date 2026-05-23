@@ -42,20 +42,13 @@ function blocks_process_line(line) {
     handle_top_level_line(line)
 }
 
-function handle_fenced_code_line(line,    content) {
-    if (block_context == "blockquote") {
-        if (!strip_blockquote_markers(line, current_block_quote_depth)) {
-            close_blockquote_and_reprocess(line)
-            return
-        }
-        content = matched_content
-    } else if (block_context == "list") {
-        content = strip_list_continuation(line)
-    } else {
-        content = line
+function handle_fenced_code_line(line) {
+    if (!continue_leaf_container(line, 0)) {
+        close_blockquote_and_reprocess(line)
+        return
     }
 
-    if (is_closing_fence(content)) {
+    if (is_closing_fence(container_content)) {
         if (block_context == "blockquote") {
             close_open_block()
             set_block_state("blockquote", "")
@@ -68,7 +61,7 @@ function handle_fenced_code_line(line,    content) {
         return
     }
 
-    node_append_literal(open_node, strip_indent(content, fence_indent))
+    node_append_literal(open_node, strip_indent(container_content, fence_indent))
 }
 
 function handle_indented_code_line(line) {
@@ -110,8 +103,8 @@ function handle_html_block_line(line) {
             leave_blockquote_context()
             return
         }
-        if (strip_blockquote_markers(line, current_block_quote_depth)) {
-            node_append_literal(open_node, matched_content)
+        if (continue_leaf_container(line, 0)) {
+            node_append_literal(open_node, container_content)
             return
         }
         close_blockquote_and_reprocess(line)
@@ -212,13 +205,13 @@ function handle_blockquote_paragraph_line(line) {
         leave_blockquote_paragraph()
         return
     }
-    if (strip_blockquote_markers_upto(line, current_block_quote_depth)) {
-        if (is_blank(matched_content)) {
+    if (continue_leaf_container(line, 1)) {
+        if (is_blank(container_content)) {
             close_open_block()
             set_block_state("blockquote", "")
             return
         }
-        node_append_literal(open_node, matched_content)
+        node_append_literal(open_node, container_content)
         return
     }
     if (match_thematic_break(line)) {
@@ -316,8 +309,7 @@ function handle_top_level_line(line,    html_id, para_id) {
 
     if (match_html_block_start(line)) {
         reset_list_context()
-        html_id = start_html_block(root_node, "", line)
-        html_block_end = matched_html_block_end
+        html_id = start_html_block(root_node, "", line, matched_html_block_end)
         if (html_block_end != "blank" && index(tolower(line), html_block_end)) {
             close_open_block()
         }
@@ -354,6 +346,21 @@ function close_open_block() {
 function set_block_state(context, leaf) {
     block_context = context
     leaf_state = leaf
+}
+
+function continue_leaf_container(line, allow_partial,    content) {
+    content = line
+    if (current_block_quote_depth && (block_context == "blockquote" || current_list_in_blockquote)) {
+        if (!(allow_partial ? strip_blockquote_markers_upto(content, current_block_quote_depth) : strip_blockquote_markers(content, current_block_quote_depth))) {
+            return 0
+        }
+        content = matched_content
+    }
+    if (block_context == "list") {
+        content = strip_list_continuation(content)
+    }
+    container_content = content
+    return 1
 }
 
 function close_open_block_and_reprocess(line) {
@@ -778,6 +785,9 @@ function start_fenced_code_block(parent, context,    code_id) {
     node_set_attr(code_id, "info", matched_content)
     node_append_child(parent, code_id)
     open_node = code_id
+    fence_char = matched_fence_char
+    fence_len = matched_fence_len
+    fence_indent = matched_fence_indent
     set_block_state(context, "fenced_code")
 }
 
@@ -787,6 +797,8 @@ function start_indented_code_block(parent, context, literal, indent,    code_id)
     open_node = code_id
     set_block_state(context, "indented_code")
     if (context == "list") {
+        # List code blocks continue relative to the item content column, not
+        # relative to the current line after container stripping.
         list_code_indent = indent
     }
     node_append_literal(open_node, literal)
@@ -805,10 +817,11 @@ function append_thematic_break_block(parent,    hr_id) {
     open_node = 0
 }
 
-function start_html_block(parent, context, content,    html_id) {
+function start_html_block(parent, context, content, end_marker,    html_id) {
     html_id = node_new("html_block")
     node_append_child(parent, html_id)
     open_node = html_id
+    html_block_end = end_marker
     set_block_state(context, "html_block")
     node_append_literal(open_node, content)
     return html_id
@@ -976,10 +989,6 @@ function start_blockquote_list(content,    list_id, item_id, quote_id, para_id) 
     set_block_state("blockquote", "")
 }
 
-function start_blockquote_html_block(content) {
-    start_html_block(current_block_quote, "blockquote", content)
-}
-
 function start_blockquote_paragraph(content,    para_id) {
     para_id = append_paragraph_block(current_block_quote, content)
     open_node = para_id
@@ -1013,6 +1022,7 @@ function append_blockquote_content(content) {
 
     if (is_blank(content)) {
         if (current_list) {
+            # A blank line inside a list may make it loose once content resumes.
             pending_list_blank = 1
         }
         set_block_state("blockquote", "")
@@ -1043,7 +1053,7 @@ function append_blockquote_content(content) {
     }
 
     if (match_html_block_start(content)) {
-        start_blockquote_html_block(content)
+        start_html_block(current_block_quote, "blockquote", content, matched_html_block_end)
         return
     }
 
@@ -1166,9 +1176,9 @@ function match_opening_fence(line,    text, indent, i, ch, marker, count, info) 
         return 0
     }
 
-    fence_char = marker
-    fence_len = count
-    fence_indent = indent
+    matched_fence_char = marker
+    matched_fence_len = count
+    matched_fence_indent = indent
     matched_content = info
     return 1
 }
