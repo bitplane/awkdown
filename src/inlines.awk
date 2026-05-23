@@ -10,10 +10,22 @@ function inlines_init() {
         return
     }
 
-    init_entity_data()
-    load_entities()
     init_autolink_href_escapes()
     inlines_initialized = 1
+}
+
+# The named-entity table is large (~2000 entries) and most documents never use a
+# single named reference, so building it eagerly in inlines_init() wastes ~18ms
+# per process. Defer it until the first named reference is actually decoded.
+# Numeric references (&#123; / &#xAB;) never touch this table.
+function ensure_entities_loaded() {
+    if (entities_loaded) {
+        return
+    }
+
+    init_entity_data()
+    load_entities()
+    entities_loaded = 1
 }
 
 # Decode the packed blob built by init_entity_data() (generated at build time
@@ -744,6 +756,7 @@ function decode_character_reference(ref,    body, codepoint, name) {
         }
         char_ref_text = character_from_codepoint(codepoint)
     } else {
+        ensure_entities_loaded()
         name = substr(ref, 2)
         if (!(name in named_entity)) {
             return 0
