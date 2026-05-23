@@ -21,227 +21,278 @@ function blocks_init() {
     current_list_in_blockquote = 0
 }
 
-function blocks_process_line(line,    heading_id, hr_id, code_id, para_id) {
+function blocks_process_line(line) {
     if (block_state == "fenced_code") {
-        if (is_closing_fence(line)) {
-            close_open_block()
-        } else {
-            node_append_literal(open_node, strip_indent(line, fence_indent))
-        }
+        handle_fenced_code_line(line)
         return
     }
 
     if (block_state == "indented_code") {
-        if (is_blank(line)) {
-            if (leading_spaces(line) >= 4) {
-                node_append_literal(open_node, strip_indent(line, 4))
-            } else {
-                node_append_literal(open_node, "")
-            }
+        if (handle_indented_code_line(line)) {
             return
         }
-        if (leading_spaces(line) >= 4) {
-            node_append_literal(open_node, strip_indent(line, 4))
-            return
-        }
-        close_open_block()
     }
 
     if (block_state == "list_indented_code") {
-        if (is_blank(line)) {
-            node_append_literal(open_node, "")
-            return
-        }
-        if (leading_spaces(line) >= list_code_indent) {
-            node_append_literal(open_node, strip_indent(line, list_code_indent))
-            return
-        }
-        open_node = 0
-        block_state = ""
-        blocks_process_line(line)
+        handle_list_indented_code_line(line)
         return
     }
 
     if (block_state == "list_fenced_code") {
-        if (is_closing_fence(strip_list_continuation(line))) {
-            open_node = 0
-            block_state = ""
-        } else {
-            node_append_literal(open_node, strip_indent(strip_list_continuation(line), fence_indent))
-        }
+        handle_list_fenced_code_line(line)
         return
     }
 
     if (block_state == "html_block") {
-        if (html_block_end == "blank" && is_blank(line)) {
-            close_open_block()
-            return
-        }
-        node_append_literal(open_node, line)
-        if (html_block_end != "blank" && index(tolower(line), html_block_end)) {
-            close_open_block()
-        }
+        handle_html_block_line(line)
         return
     }
 
     if (block_state == "blockquote_fenced_code") {
-        if (strip_blockquote_markers(line, current_block_quote_depth)) {
-            line = matched_content
-        } else {
-            close_open_block()
-            leave_blockquote_context()
-            blocks_process_line(line)
-            return
-        }
-        if (is_closing_fence(line)) {
-            close_open_block()
-            block_state = "blockquote_open"
-        } else {
-            node_append_literal(open_node, strip_indent(line, fence_indent))
-        }
+        handle_blockquote_fenced_code_line(line)
         return
     }
 
     if (block_state == "paragraph") {
-        if (is_blank(line)) {
-            close_open_block()
-            return
-        }
-        if (match_setext_heading(line)) {
-            extract_reference_definitions(open_node)
-            if (node_type[open_node] == "reference_definition") {
-                close_open_block()
-                blocks_process_line(line)
-                return
-            }
-            node_type[open_node] = "heading"
-            node_set_attr(open_node, "level", matched_level)
-            close_open_block()
-            return
-        }
-        if (match_atx_heading(line) || match_thematic_break(line) || match_opening_fence(line) || (match_html_block_start(line) && matched_html_block_can_interrupt)) {
-            close_open_block()
-            blocks_process_line(line)
-            return
-        }
-        if (match_blockquote_marker(line)) {
-            close_open_block()
-            blocks_process_line(line)
-            return
-        }
-        if (match_list_marker(line) && list_can_interrupt_paragraph()) {
-            close_open_block()
-            blocks_process_line(line)
-            return
-        }
-        node_append_literal(open_node, line)
+        handle_paragraph_line(line)
         return
     }
 
     if (block_state == "list_paragraph") {
-        if (is_blank(line)) {
-            close_open_block()
-            pending_list_blank = 1
-            return
-        }
-        if (current_list && leading_spaces(line) >= current_list_content_indent && match_setext_heading(strip_list_continuation(line))) {
-            node_type[open_node] = "heading"
-            node_set_attr(open_node, "level", matched_level)
-            close_open_block()
-            return
-        }
-        if (match_thematic_break(line)) {
-            close_open_block()
-            current_list = 0
-            blocks_process_line(line)
-            return
-        }
-        if (current_list && leading_spaces(line) == current_list_marker_indent && match_list_marker(line)) {
-            start_list_item()
-            return
-        }
-        while (current_list_depth > 1 && leading_spaces(line) < current_list_content_indent) {
-            if (leading_spaces(line) == current_list_marker_indent && match_list_marker(line)) {
-                break
-            }
-            pop_list_context()
-        }
-        if (current_list && leading_spaces(line) >= current_list_content_indent) {
-            if (start_list_child_block(line)) {
-                return
-            }
-        }
-        if (match_list_marker(line)) {
-            start_list_item()
-            return
-        }
-        node_append_literal(open_node, strip_list_continuation(line))
+        handle_list_paragraph_line(line)
         return
     }
 
     if (block_state == "blockquote_paragraph") {
-        if (is_blank(line)) {
-            close_open_block()
-            current_block_quote = 0
-            return
-        }
-        if (strip_blockquote_markers_upto(line, current_block_quote_depth)) {
-            if (is_blank(matched_content)) {
-                close_open_block()
-                block_state = "blockquote_open"
-                return
-            }
-            node_append_literal(open_node, matched_content)
-            return
-        }
-        if (match_thematic_break(line)) {
-            close_open_block()
-            leave_blockquote_context()
-            blocks_process_line(line)
-            return
-        }
-        if (match_opening_fence(line) || match_list_marker(line)) {
-            close_open_block()
-            current_block_quote = 0
-            blocks_process_line(line)
-            return
-        }
-        node_append_literal(open_node, line)
+        handle_blockquote_paragraph_line(line)
         return
     }
 
     if (block_state == "blockquote_open") {
-        if (is_blank(line)) {
-            leave_blockquote_context()
-            block_state = ""
-            return
-        }
-        if (strip_blockquote_markers(line, current_block_quote_depth)) {
-            append_blockquote_content(matched_content)
-            return
-        }
-        leave_blockquote_context()
-        block_state = ""
-        blocks_process_line(line)
+        handle_blockquote_open_line(line)
         return
     }
 
     if (block_state == "blockquote_html") {
-        if (is_blank(line)) {
-            close_open_block()
-            leave_blockquote_context()
-            return
+        handle_blockquote_html_line(line)
+        return
+    }
+
+    handle_top_level_line(line)
+}
+
+function handle_fenced_code_line(line) {
+    if (is_closing_fence(line)) {
+        close_open_block()
+    } else {
+        node_append_literal(open_node, strip_indent(line, fence_indent))
+    }
+}
+
+function handle_indented_code_line(line) {
+    if (is_blank(line)) {
+        if (leading_spaces(line) >= 4) {
+            node_append_literal(open_node, strip_indent(line, 4))
+        } else {
+            node_append_literal(open_node, "")
         }
-        if (strip_blockquote_markers(line, current_block_quote_depth)) {
-            node_append_literal(open_node, matched_content)
-            return
-        }
+        return 1
+    }
+    if (leading_spaces(line) >= 4) {
+        node_append_literal(open_node, strip_indent(line, 4))
+        return 1
+    }
+    close_open_block()
+    return 0
+}
+
+function handle_list_indented_code_line(line) {
+    if (is_blank(line)) {
+        node_append_literal(open_node, "")
+        return
+    }
+    if (leading_spaces(line) >= list_code_indent) {
+        node_append_literal(open_node, strip_indent(line, list_code_indent))
+        return
+    }
+    open_node = 0
+    block_state = ""
+    blocks_process_line(line)
+}
+
+function handle_list_fenced_code_line(line) {
+    if (is_closing_fence(strip_list_continuation(line))) {
+        open_node = 0
+        block_state = ""
+    } else {
+        node_append_literal(open_node, strip_indent(strip_list_continuation(line), fence_indent))
+    }
+}
+
+function handle_html_block_line(line) {
+    if (html_block_end == "blank" && is_blank(line)) {
+        close_open_block()
+        return
+    }
+    node_append_literal(open_node, line)
+    if (html_block_end != "blank" && index(tolower(line), html_block_end)) {
+        close_open_block()
+    }
+}
+
+function handle_blockquote_fenced_code_line(line) {
+    if (strip_blockquote_markers(line, current_block_quote_depth)) {
+        line = matched_content
+    } else {
         close_open_block()
         leave_blockquote_context()
         blocks_process_line(line)
         return
     }
+    if (is_closing_fence(line)) {
+        close_open_block()
+        block_state = "blockquote_open"
+    } else {
+        node_append_literal(open_node, strip_indent(line, fence_indent))
+    }
+}
 
+function handle_paragraph_line(line) {
+    if (is_blank(line)) {
+        close_open_block()
+        return
+    }
+    if (match_setext_heading(line)) {
+        extract_reference_definitions(open_node)
+        if (node_type[open_node] == "reference_definition") {
+            close_open_block()
+            blocks_process_line(line)
+            return
+        }
+        node_type[open_node] = "heading"
+        node_set_attr(open_node, "level", matched_level)
+        close_open_block()
+        return
+    }
+    if (match_atx_heading(line) || match_thematic_break(line) || match_opening_fence(line) || (match_html_block_start(line) && matched_html_block_can_interrupt)) {
+        close_open_block()
+        blocks_process_line(line)
+        return
+    }
+    if (match_blockquote_marker(line)) {
+        close_open_block()
+        blocks_process_line(line)
+        return
+    }
+    if (match_list_marker(line) && list_can_interrupt_paragraph()) {
+        close_open_block()
+        blocks_process_line(line)
+        return
+    }
+    node_append_literal(open_node, line)
+}
+
+function handle_list_paragraph_line(line) {
+    if (is_blank(line)) {
+        close_open_block()
+        pending_list_blank = 1
+        return
+    }
+    if (current_list && leading_spaces(line) >= current_list_content_indent && match_setext_heading(strip_list_continuation(line))) {
+        node_type[open_node] = "heading"
+        node_set_attr(open_node, "level", matched_level)
+        close_open_block()
+        return
+    }
+    if (match_thematic_break(line)) {
+        close_open_block()
+        current_list = 0
+        blocks_process_line(line)
+        return
+    }
+    if (current_list && leading_spaces(line) == current_list_marker_indent && match_list_marker(line)) {
+        start_list_item()
+        return
+    }
+    while (current_list_depth > 1 && leading_spaces(line) < current_list_content_indent) {
+        if (leading_spaces(line) == current_list_marker_indent && match_list_marker(line)) {
+            break
+        }
+        pop_list_context()
+    }
+    if (current_list && leading_spaces(line) >= current_list_content_indent) {
+        if (start_list_child_block(line)) {
+            return
+        }
+    }
+    if (match_list_marker(line)) {
+        start_list_item()
+        return
+    }
+    node_append_literal(open_node, strip_list_continuation(line))
+}
+
+function handle_blockquote_paragraph_line(line) {
+    if (is_blank(line)) {
+        close_open_block()
+        current_block_quote = 0
+        return
+    }
+    if (strip_blockquote_markers_upto(line, current_block_quote_depth)) {
+        if (is_blank(matched_content)) {
+            close_open_block()
+            block_state = "blockquote_open"
+            return
+        }
+        node_append_literal(open_node, matched_content)
+        return
+    }
+    if (match_thematic_break(line)) {
+        close_open_block()
+        leave_blockquote_context()
+        blocks_process_line(line)
+        return
+    }
+    if (match_opening_fence(line) || match_list_marker(line)) {
+        close_open_block()
+        current_block_quote = 0
+        blocks_process_line(line)
+        return
+    }
+    node_append_literal(open_node, line)
+}
+
+function handle_blockquote_open_line(line) {
+    if (is_blank(line)) {
+        leave_blockquote_context()
+        block_state = ""
+        return
+    }
+    if (strip_blockquote_markers(line, current_block_quote_depth)) {
+        append_blockquote_content(matched_content)
+        return
+    }
+    leave_blockquote_context()
+    block_state = ""
+    blocks_process_line(line)
+}
+
+function handle_blockquote_html_line(line) {
+    if (is_blank(line)) {
+        close_open_block()
+        leave_blockquote_context()
+        return
+    }
+    if (strip_blockquote_markers(line, current_block_quote_depth)) {
+        node_append_literal(open_node, matched_content)
+        return
+    }
+    close_open_block()
+    leave_blockquote_context()
+    blocks_process_line(line)
+}
+
+function handle_top_level_line(line,    heading_id, hr_id, code_id, para_id) {
     if (is_blank(line)) {
         if (current_list) {
             pending_list_blank = 1

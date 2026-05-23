@@ -328,7 +328,7 @@ function unicode_is_punctuation_or_symbol(ch,    codepoint) {
     return codepoint == 163 || codepoint == 165 || codepoint == 167 || codepoint == 169 || codepoint == 171 || codepoint == 172 || codepoint == 174 || codepoint == 176 || codepoint == 177 || codepoint == 182 || codepoint == 183 || codepoint == 187 || codepoint == 191 || (codepoint >= 8208 && codepoint <= 8292) || (codepoint >= 8352 && codepoint <= 8399) || codepoint == 123647
 }
 
-function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, content, html_end, spaces, j, saved_label, saved_dest, saved_title, saved_end, html) {
+function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, content, html_end, spaces, j, saved_label, saved_dest, saved_title, saved_end) {
     out = ""
     for (i = 1; i <= length(text); i++) {
         ch = substr(text, i, 1)
@@ -344,40 +344,18 @@ function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, conte
                 saved_dest = image_src
                 saved_title = image_title
                 saved_end = image_end
-                html = "<img src=\"" html_attr_escape(saved_dest) "\" alt=\"" html_attr_escape(render_alt_text(saved_label)) "\""
-                if (saved_title != "") {
-                    html = html " title=\"" html_attr_escape(saved_title) "\""
-                }
-                html = html ">"
-                out = out protect_inline_html(html)
+                out = out protect_inline_html(render_image_html(saved_label, saved_dest, saved_title))
                 i = saved_end
             } else {
                 out = out html_escape(ch)
             }
         } else if (ch == "[") {
-            if (parse_inline_link(text, i)) {
+            if (parse_inline_link(text, i) || parse_reference_link(text, i)) {
                 saved_label = link_label
                 saved_dest = link_dest
                 saved_title = link_title
                 saved_end = link_end
-                html = "<a href=\"" html_attr_escape(saved_dest) "\""
-                if (saved_title != "") {
-                    html = html " title=\"" html_attr_escape(saved_title) "\""
-                }
-                html = html ">" render_inline_text(saved_label) "</a>"
-                out = out protect_inline_html(html)
-                i = saved_end
-            } else if (parse_reference_link(text, i)) {
-                saved_label = link_label
-                saved_dest = link_dest
-                saved_title = link_title
-                saved_end = link_end
-                html = "<a href=\"" html_attr_escape(saved_dest) "\""
-                if (saved_title != "") {
-                    html = html " title=\"" html_attr_escape(saved_title) "\""
-                }
-                html = html ">" render_inline_text(saved_label) "</a>"
-                out = out protect_inline_html(html)
+                out = out protect_inline_html(render_link_html(saved_label, saved_dest, saved_title))
                 i = saved_end
             } else {
                 out = out html_escape(ch)
@@ -405,57 +383,9 @@ function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, conte
                 out = out ch
             }
         } else if (ch == "<") {
-            if (substr(text, i, 4) == "<!--") {
-                html_end = find_sequence(text, i + 4, "-->")
-                if (html_end) {
-                    if (substr(text, i, 5) == "<!-->") {
-                        out = out protect_inline_html("<!-->" html_escape(substr(text, i + 5, html_end - i - 2)))
-                    } else if (substr(text, i, 6) == "<!--->") {
-                        out = out protect_inline_html("<!--->" html_escape(substr(text, i + 6, html_end - i - 3)))
-                    } else {
-                        out = out protect_inline_html(substr(text, i, html_end - i + 3))
-                    }
-                    i = html_end + 2
-                    continue
-                }
-            } else if (substr(text, i, 2) == "<?") {
-                html_end = find_sequence(text, i + 2, "?>")
-                if (html_end) {
-                    out = out protect_inline_html(substr(text, i, html_end - i + 2))
-                    i = html_end + 1
-                    continue
-                }
-            } else if (substr(text, i, 9) == "<![CDATA[") {
-                html_end = find_sequence(text, i + 9, "]]>")
-                if (html_end) {
-                    out = out protect_inline_html(substr(text, i, html_end - i + 3))
-                    i = html_end + 2
-                    continue
-                }
-            } else if (substr(text, i, 2) == "<!" && substr(text, i + 2, 1) ~ /^[A-Z]$/) {
-                html_end = find_angle_end(text, i + 2)
-                if (html_end) {
-                    out = out protect_inline_html(substr(text, i, html_end - i + 1))
-                    i = html_end
-                    continue
-                }
-            }
-
-            html_end = find_html_tag_end(text, i + 1)
-            if (html_end) {
-                content = substr(text, i + 1, html_end - i - 1)
-                if (is_uri_autolink(content)) {
-                    out = out protect_inline_html("<a href=\"" html_attr_escape(uri_autolink_href(content)) "\">" html_escape(content) "</a>")
-                    i = html_end
-                } else if (is_email_autolink(content)) {
-                    out = out protect_inline_html("<a href=\"mailto:" html_attr_escape(content) "\">" html_escape(content) "</a>")
-                    i = html_end
-                } else if (is_raw_html_inline(content)) {
-                    out = out protect_inline_html("<" content ">")
-                    i = html_end
-                } else {
-                    out = out html_escape(ch)
-                }
+            if (parse_inline_html_or_autolink(text, i)) {
+                out = out protect_inline_html(inline_html)
+                i = inline_html_end
             } else {
                 out = out html_escape(ch)
             }
@@ -479,6 +409,90 @@ function render_inline_base(text,    out, i, ch, next_ch, prev_ch, closer, conte
         }
     }
     return out
+}
+
+function render_link_html(label, dest, title,    html) {
+    html = "<a href=\"" html_attr_escape(dest) "\""
+    if (title != "") {
+        html = html " title=\"" html_attr_escape(title) "\""
+    }
+    return html ">" render_inline_text(label) "</a>"
+}
+
+function render_image_html(label, src, title,    html) {
+    html = "<img src=\"" html_attr_escape(src) "\" alt=\"" html_attr_escape(render_alt_text(label)) "\""
+    if (title != "") {
+        html = html " title=\"" html_attr_escape(title) "\""
+    }
+    return html ">"
+}
+
+function parse_inline_html_or_autolink(text, start,    html_end, content) {
+    inline_html = ""
+    inline_html_end = start
+
+    if (substr(text, start, 4) == "<!--") {
+        html_end = find_sequence(text, start + 4, "-->")
+        if (html_end) {
+            if (substr(text, start, 5) == "<!-->") {
+                inline_html = "<!-->" html_escape(substr(text, start + 5, html_end - start - 2))
+            } else if (substr(text, start, 6) == "<!--->") {
+                inline_html = "<!--->" html_escape(substr(text, start + 6, html_end - start - 3))
+            } else {
+                inline_html = substr(text, start, html_end - start + 3)
+            }
+            inline_html_end = html_end + 2
+            return 1
+        }
+    } else if (substr(text, start, 2) == "<?") {
+        html_end = find_sequence(text, start + 2, "?>")
+        if (html_end) {
+            inline_html = substr(text, start, html_end - start + 2)
+            inline_html_end = html_end + 1
+            return 1
+        }
+    } else if (substr(text, start, 9) == "<![CDATA[") {
+        html_end = find_sequence(text, start + 9, "]]>")
+        if (html_end) {
+            inline_html = substr(text, start, html_end - start + 3)
+            inline_html_end = html_end + 2
+            return 1
+        }
+    } else if (substr(text, start, 2) == "<!" && substr(text, start + 2, 1) ~ /^[A-Z]$/) {
+        html_end = find_angle_end(text, start + 2)
+        if (html_end) {
+            inline_html = substr(text, start, html_end - start + 1)
+            inline_html_end = html_end
+            return 1
+        }
+    }
+
+    html_end = find_html_tag_end(text, start + 1)
+    if (!html_end) {
+        return 0
+    }
+
+    content = substr(text, start + 1, html_end - start - 1)
+    if (is_uri_autolink(content)) {
+        inline_html = render_uri_autolink_html(content)
+    } else if (is_email_autolink(content)) {
+        inline_html = render_email_autolink_html(content)
+    } else if (is_raw_html_inline(content)) {
+        inline_html = "<" content ">"
+    } else {
+        return 0
+    }
+
+    inline_html_end = html_end
+    return 1
+}
+
+function render_uri_autolink_html(content) {
+    return "<a href=\"" html_attr_escape(uri_autolink_href(content)) "\">" html_escape(content) "</a>"
+}
+
+function render_email_autolink_html(content) {
+    return "<a href=\"mailto:" html_attr_escape(content) "\">" html_escape(content) "</a>"
 }
 
 function parse_image(text, start) {
