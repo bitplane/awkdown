@@ -234,7 +234,15 @@ function emphasis_right_flanking(prev_ch, next_ch) {
 }
 
 function emphasis_is_space(ch) {
-    return ch == "" || ch == " " || ch == "\t" || ch == "\n" || ch == " "
+    return ch == "" || ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || is_unicode_space_separator(ch)
+}
+
+function is_unicode_space_separator(ch,    codepoint) {
+    if (is_ascii_character(ch)) {
+        return 0
+    }
+    codepoint = unicode_codepoint(ch)
+    return codepoint == 160 || codepoint == 5760 || (codepoint >= 8192 && codepoint <= 8202) || codepoint == 8239 || codepoint == 8287 || codepoint == 12288
 }
 
 function emphasis_is_punctuation(ch) {
@@ -586,13 +594,33 @@ function decode_character_references_string(text,    out, i, ch) {
     return out
 }
 
-function decode_character_reference(ref,    body) {
+function decode_character_reference(ref,    body, codepoint) {
     char_ref_text = ""
 
-    if (ref == "&amp;") {
+    if (ref ~ /^&#[0-9]+;$/) {
+        body = substr(ref, 3, length(ref) - 3)
+        codepoint = parse_decimal_codepoint(body)
+        if (codepoint > 1114111) {
+            return 0
+        }
+        char_ref_text = character_from_codepoint(codepoint)
+    } else if (ref ~ /^&#[xX][0-9A-Fa-f]+;$/) {
+        body = substr(ref, 4, length(ref) - 4)
+        codepoint = parse_hex_codepoint(body)
+        if (codepoint > 1114111) {
+            return 0
+        }
+        char_ref_text = character_from_codepoint(codepoint)
+    } else if (ref == "&amp;") {
         char_ref_text = "&"
+    } else if (ref == "&lt;") {
+        char_ref_text = "<"
+    } else if (ref == "&gt;") {
+        char_ref_text = ">"
     } else if (ref == "&quot;") {
         char_ref_text = "\""
+    } else if (ref == "&apos;") {
+        char_ref_text = "'"
     } else if (ref == "&nbsp;") {
         char_ref_text = " "
     } else if (ref == "&copy;") {
@@ -615,31 +643,45 @@ function decode_character_reference(ref,    body) {
         char_ref_text = "ö"
     } else if (ref == "&auml;") {
         char_ref_text = "ä"
-    } else if (ref == "&#35;" || ref == "&#x23;" || ref == "&#X23;") {
-        char_ref_text = "#"
-    } else if (ref == "&#42;" || ref == "&#x2A;" || ref == "&#x2a;" || ref == "&#X2A;" || ref == "&#X2a;") {
-        char_ref_text = "*"
-    } else if (ref == "&#9;" || ref == "&#x9;" || ref == "&#X9;") {
-        char_ref_text = "\t"
-    } else if (ref == "&#10;" || ref == "&#xA;" || ref == "&#xa;" || ref == "&#XA;" || ref == "&#Xa;") {
-        char_ref_text = "\n"
-    } else if (ref == "&#0;" || ref == "&#x0;" || ref == "&#X0;") {
-        char_ref_text = "�"
-    } else if (ref == "&#1234;") {
-        char_ref_text = "Ӓ"
-    } else if (ref == "&#992;") {
-        char_ref_text = "Ϡ"
-    } else if (ref == "&#X22;" || ref == "&#x22;") {
-        char_ref_text = "\""
-    } else if (ref == "&#XD06;" || ref == "&#xd06;") {
-        char_ref_text = "ആ"
-    } else if (ref == "&#xcab;" || ref == "&#XCAB;") {
-        char_ref_text = "ಫ"
     } else {
         return 0
     }
 
     return 1
+}
+
+function parse_decimal_codepoint(text,    i, value, digit) {
+    value = 0
+    for (i = 1; i <= length(text); i++) {
+        digit = substr(text, i, 1) + 0
+        value = (value * 10) + digit
+    }
+    return value
+}
+
+function parse_hex_codepoint(text,    i, value) {
+    value = 0
+    for (i = 1; i <= length(text); i++) {
+        value = (value * 16) + hex_digit_value(substr(text, i, 1))
+    }
+    return value
+}
+
+function hex_digit_value(ch) {
+    if (ch >= "0" && ch <= "9") {
+        return ch + 0
+    }
+    if (ch >= "a" && ch <= "f") {
+        return index("abcdef", ch) + 9
+    }
+    return index("ABCDEF", ch) + 9
+}
+
+function character_from_codepoint(codepoint) {
+    if (codepoint == 0 || (codepoint >= 55296 && codepoint <= 57343)) {
+        return "�"
+    }
+    return sprintf("%c", codepoint)
 }
 
 function find_angle_end(text, start,    i, ch) {
@@ -1015,23 +1057,72 @@ function link_href_escape(text,    out, i, ch) {
             out = out "%22"
         } else if (ch == "\\") {
             out = out "%5C"
-        } else if (ch == " ") {
-            out = out "%C2%A0"
-        } else if (ch == "ö") {
-            out = out "%C3%B6"
-        } else if (ch == "ä") {
-            out = out "%C3%A4"
-        } else if (ch == "φ") {
-            out = out "%CF%86"
-        } else if (ch == "ο") {
-            out = out "%CE%BF"
-        } else if (ch == "υ") {
-            out = out "%CF%85"
+        } else if (!is_ascii_character(ch)) {
+            out = out utf8_percent_encode(ch)
         } else {
             out = out ch
         }
     }
     return out
+}
+
+function is_ascii_character(ch,    i) {
+    if (!ascii_character_cache_ready) {
+        for (i = 1; i < 128; i++) {
+            ascii_character_cache[sprintf("%c", i)] = 1
+        }
+        ascii_character_cache_ready = 1
+    }
+    return ch in ascii_character_cache
+}
+
+function utf8_percent_encode(ch,    codepoint, out, b1, b2, b3, b4) {
+    codepoint = unicode_codepoint(ch)
+    if (codepoint < 0) {
+        return ch
+    }
+    if (codepoint < 128) {
+        return sprintf("%%%02X", codepoint)
+    }
+    if (codepoint < 2048) {
+        b1 = 192 + int(codepoint / 64)
+        b2 = 128 + (codepoint % 64)
+        return sprintf("%%%02X%%%02X", b1, b2)
+    }
+    if (codepoint < 65536) {
+        b1 = 224 + int(codepoint / 4096)
+        b2 = 128 + (int(codepoint / 64) % 64)
+        b3 = 128 + (codepoint % 64)
+        return sprintf("%%%02X%%%02X%%%02X", b1, b2, b3)
+    }
+
+    b1 = 240 + int(codepoint / 262144)
+    b2 = 128 + (int(codepoint / 4096) % 64)
+    b3 = 128 + (int(codepoint / 64) % 64)
+    b4 = 128 + (codepoint % 64)
+    return sprintf("%%%02X%%%02X%%%02X%%%02X", b1, b2, b3, b4)
+}
+
+function unicode_codepoint(ch,    codepoint) {
+    if (ch in unicode_codepoint_cache) {
+        return unicode_codepoint_cache[ch]
+    }
+
+    for (codepoint = 128; codepoint <= 65535; codepoint++) {
+        if (sprintf("%c", codepoint) == ch) {
+            unicode_codepoint_cache[ch] = codepoint
+            return codepoint
+        }
+    }
+    for (codepoint = 65536; codepoint <= 1114111; codepoint++) {
+        if (sprintf("%c", codepoint) == ch) {
+            unicode_codepoint_cache[ch] = codepoint
+            return codepoint
+        }
+    }
+
+    unicode_codepoint_cache[ch] = -1
+    return -1
 }
 
 function find_code_span_closer(text, start,    i, run, len) {
