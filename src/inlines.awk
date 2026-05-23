@@ -1,7 +1,66 @@
 function render_inlines(text) {
+    inlines_init()
     inline_depth = 0
     inline_token_count = 0
     return render_inline_text(text)
+}
+
+function inlines_init() {
+    if (inlines_initialized) {
+        return
+    }
+
+    init_named_entities()
+    init_autolink_href_escapes()
+    inlines_initialized = 1
+}
+
+function init_named_entities() {
+    named_entity["amp;"] = "&"
+    named_entity["lt;"] = "<"
+    named_entity["gt;"] = ">"
+    named_entity["quot;"] = "\""
+    named_entity["apos;"] = "'"
+    named_entity["nbsp;"] = " "
+    named_entity["copy;"] = "©"
+    named_entity["reg;"] = "®"
+    named_entity["trade;"] = "™"
+    named_entity["mdash;"] = "—"
+    named_entity["ndash;"] = "–"
+    named_entity["hellip;"] = "…"
+    named_entity["lsquo;"] = "‘"
+    named_entity["rsquo;"] = "’"
+    named_entity["ldquo;"] = "“"
+    named_entity["rdquo;"] = "”"
+    named_entity["laquo;"] = "«"
+    named_entity["raquo;"] = "»"
+    named_entity["euro;"] = "€"
+    named_entity["pound;"] = "£"
+    named_entity["yen;"] = "¥"
+    named_entity["cent;"] = "¢"
+    named_entity["plusmn;"] = "±"
+    named_entity["times;"] = "×"
+    named_entity["divide;"] = "÷"
+    named_entity["ne;"] = "≠"
+    named_entity["le;"] = "≤"
+    named_entity["ge;"] = "≥"
+    named_entity["deg;"] = "°"
+    named_entity["AElig;"] = "Æ"
+    named_entity["Dcaron;"] = "Ď"
+    named_entity["frac34;"] = "¾"
+    named_entity["HilbertSpace;"] = "ℋ"
+    named_entity["DifferentialD;"] = "ⅆ"
+    named_entity["ClockwiseContourIntegral;"] = "∲"
+    named_entity["ngE;"] = "≧̸"
+    named_entity["ouml;"] = "ö"
+    named_entity["auml;"] = "ä"
+}
+
+function init_autolink_href_escapes() {
+    autolink_href_escape["\\"] = "%5C"
+    autolink_href_escape["`"] = "%60"
+    autolink_href_escape["["] = "%5B"
+    autolink_href_escape["]"] = "%5D"
 }
 
 function render_inline_text(text,    out) {
@@ -594,7 +653,8 @@ function decode_character_references_string(text,    out, i, ch) {
     return out
 }
 
-function decode_character_reference(ref,    body, codepoint) {
+function decode_character_reference(ref,    body, codepoint, name) {
+    inlines_init()
     char_ref_text = ""
 
     if (ref ~ /^&#[0-9]+;$/) {
@@ -611,40 +671,12 @@ function decode_character_reference(ref,    body, codepoint) {
             return 0
         }
         char_ref_text = character_from_codepoint(codepoint)
-    } else if (ref == "&amp;") {
-        char_ref_text = "&"
-    } else if (ref == "&lt;") {
-        char_ref_text = "<"
-    } else if (ref == "&gt;") {
-        char_ref_text = ">"
-    } else if (ref == "&quot;") {
-        char_ref_text = "\""
-    } else if (ref == "&apos;") {
-        char_ref_text = "'"
-    } else if (ref == "&nbsp;") {
-        char_ref_text = " "
-    } else if (ref == "&copy;") {
-        char_ref_text = "©"
-    } else if (ref == "&AElig;") {
-        char_ref_text = "Æ"
-    } else if (ref == "&Dcaron;") {
-        char_ref_text = "Ď"
-    } else if (ref == "&frac34;") {
-        char_ref_text = "¾"
-    } else if (ref == "&HilbertSpace;") {
-        char_ref_text = "ℋ"
-    } else if (ref == "&DifferentialD;") {
-        char_ref_text = "ⅆ"
-    } else if (ref == "&ClockwiseContourIntegral;") {
-        char_ref_text = "∲"
-    } else if (ref == "&ngE;") {
-        char_ref_text = "≧̸"
-    } else if (ref == "&ouml;") {
-        char_ref_text = "ö"
-    } else if (ref == "&auml;") {
-        char_ref_text = "ä"
     } else {
-        return 0
+        name = substr(ref, 2)
+        if (!(name in named_entity)) {
+            return 0
+        }
+        char_ref_text = named_entity[name]
     }
 
     return 1
@@ -846,14 +878,8 @@ function uri_autolink_href(text,    out, i, ch) {
     out = ""
     for (i = 1; i <= length(text); i++) {
         ch = substr(text, i, 1)
-        if (ch == "\\") {
-            out = out "%5C"
-        } else if (ch == "`") {
-            out = out "%60"
-        } else if (ch == "[") {
-            out = out "%5B"
-        } else if (ch == "]") {
-            out = out "%5D"
+        if (ch in autolink_href_escape) {
+            out = out autolink_href_escape[ch]
         } else {
             out = out ch
         }
