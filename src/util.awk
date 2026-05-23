@@ -7,10 +7,8 @@ function html_escape(text,    escaped) {
     return escaped
 }
 
-function html_attr_escape(text,    escaped) {
-    escaped = html_escape(text)
-    gsub(/"/, "\\&quot;", escaped)
-    return escaped
+function html_attr_escape(text) {
+    return html_escape(text)
 }
 
 function ltrim(text) {

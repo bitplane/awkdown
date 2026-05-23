@@ -62,15 +62,38 @@ function inline_token_marker(id) {
     return sprintf("%c", 28) id sprintf("%c", 28)
 }
 
+function inline_token_end(text, start,    token_end, id_text, id) {
+    token_end = find_sequence(text, start + 1, sprintf("%c", 28))
+    if (token_end == 0) {
+        return 0
+    }
+
+    id_text = substr(text, start + 1, token_end - start - 1)
+    if (id_text !~ /^[0-9]+$/) {
+        return 0
+    }
+
+    id = id_text + 0
+    if (!(id in inline_token_html)) {
+        return 0
+    }
+
+    return token_end
+}
+
 function restore_inline_tokens(text,    out, i, ch, token_end, id) {
     out = ""
     for (i = 1; i <= length(text); i++) {
         ch = substr(text, i, 1)
         if (ch == sprintf("%c", 28)) {
-            token_end = find_sequence(text, i + 1, sprintf("%c", 28))
-            id = substr(text, i + 1, token_end - i - 1) + 0
-            out = out restore_inline_tokens(inline_token_html[id])
-            i = token_end
+            token_end = inline_token_end(text, i)
+            if (token_end) {
+                id = substr(text, i + 1, token_end - i - 1) + 0
+                out = out restore_inline_tokens(inline_token_html[id])
+                i = token_end
+            } else {
+                out = out ch
+            }
         } else {
             out = out ch
         }
@@ -88,15 +111,18 @@ function html_escape_numeric(ch) {
     return html_escape(ch)
 }
 
-function render_emphasis_text(text,    i, ch, run_len, prev_ch, next_ch, left, right, can_open, can_close, id, closer, opener, use_len) {
+function render_emphasis_text(text,    i, ch, run_len, prev_ch, next_ch, left, right, can_open, can_close, id, closer, opener, use_len, token_end) {
     emphasis_reset()
 
     i = 1
     while (i <= length(text)) {
         ch = substr(text, i, 1)
         if (ch == sprintf("%c", 28)) {
-            i = find_sequence(text, i + 1, sprintf("%c", 28)) + 1
-            continue
+            token_end = inline_token_end(text, i)
+            if (token_end) {
+                i = token_end + 1
+                continue
+            }
         }
         if (ch == "*" || ch == "_") {
             run_len = marker_run_length(text, i, ch)
@@ -228,9 +254,14 @@ function render_emphasis_result(text,    out, i, id, ch, lit, token_end) {
 
         ch = substr(text, i, 1)
         if (ch == sprintf("%c", 28)) {
-            token_end = find_sequence(text, i + 1, sprintf("%c", 28))
-            out = out substr(text, i, token_end - i + 1)
-            i = token_end + 1
+            token_end = inline_token_end(text, i)
+            if (token_end) {
+                out = out substr(text, i, token_end - i + 1)
+                i = token_end + 1
+            } else {
+                out = out ch
+                i++
+            }
         } else {
             out = out ch
             i++
@@ -251,7 +282,7 @@ function emphasis_prev_char(text, pos,    i, ch) {
         return substr(text, i, pos - i)
     }
     ch = substr(text, i, 1)
-    if (ch == sprintf("%c", 28)) {
+    if (ch == sprintf("%c", 28) && inline_token_end(text, i)) {
         return "x"
     }
     return ch
@@ -265,7 +296,7 @@ function emphasis_next_char(text, pos,    ch, end) {
         return utf8_char_at(text, pos)
     }
     ch = substr(text, pos, 1)
-    if (ch == sprintf("%c", 28)) {
+    if (ch == sprintf("%c", 28) && inline_token_end(text, pos)) {
         return "x"
     }
     return ch
