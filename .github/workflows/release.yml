@@ -9,19 +9,62 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build release
+  test:
+    name: ${{ matrix.awk }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - awk: awk
+            runner: awk
+          - awk: gawk
+            runner: gawk
+          - awk: busybox awk
+            runner: busybox-awk
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y gawk
+      - name: Install AWK implementations
+        run: sudo apt-get update && sudo apt-get install -y busybox gawk
+
+      - name: Create AWK runners
+        run: |
+          mkdir -p .ci-bin
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec awk "$@"' \
+            > .ci-bin/awk
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec gawk "$@"' \
+            > .ci-bin/gawk
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'exec busybox awk "$@"' \
+            > .ci-bin/busybox-awk
+
+          chmod +x .ci-bin/awk .ci-bin/gawk .ci-bin/busybox-awk
 
       - name: Run GFM tests
-        run: make test
+        run: |
+          runner="./.ci-bin/${{ matrix.runner }}"
+          make test AWK="$runner" PROGRAM="test/awkdown.sh $runner build/awkdown"
+
+  release:
+    name: Build release
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Build release asset
         run: |
