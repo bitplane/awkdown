@@ -1,5 +1,7 @@
 AWK ?= awk
 PYTHON ?= python3
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
 GFM_SPEC_ARGS ?= --skip 619,620
 PROGRAM ?= build/awkdown
 
@@ -54,6 +56,12 @@ gfm-spec: build/awkdown ## Run vendored GitHub Flavored Markdown spec tests with
 
 .PHONY: test
 test: lint smoke gfm-spec ## Run lint, smoke tests, and the GitHub Flavored Markdown spec suite.
+
+.PHONY: install
+install: build/awkdown ## Install awkdown into BINDIR, default ~/.local/bin.
+	mkdir -p "$(BINDIR)"
+	cp build/awkdown "$(BINDIR)/awkdown"
+	chmod +x "$(BINDIR)/awkdown"
 
 .PHONY: clean
 clean: ## Remove generated build artifacts.

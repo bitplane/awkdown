@@ -298,6 +298,10 @@ function handle_top_level_line(line,    html_id, para_id) {
         return
     }
 
+    if (current_list && !match_list_marker(line)) {
+        reset_list_context()
+    }
+
     if (match_atx_heading(line)) {
         append_heading_block(root_node)
         return
