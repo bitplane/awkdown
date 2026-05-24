@@ -1344,8 +1344,6 @@ function find_link_label_end(text, start,    i, ch, depth, closer, html_end) {
                 return i
             }
             depth--
-        } else if (ch == "\n") {
-            return 0
         }
     }
     return 0
